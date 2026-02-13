@@ -118,25 +118,41 @@ def process_issue(issue):
              "ci_status": status["status"], "ci_conclusion": status["conclusion"]})
 
         if status["status"] == "completed" and status["conclusion"] in ("success", "failure"):
-            comment(issue_number, f"CI result: **{status['conclusion']}**")
-            log({"event": "ci_final", "issue": issue_number, "pr": pr_num, "conclusion": status["conclusion"]})
+            conclusion = status["conclusion"]
+
+            comment(issue_number, f"CI result: **{conclusion}**")
+            log({"event": "ci_final", "issue": issue_number, "pr": pr_num, "conclusion": conclusion})
+
+            # Label outcome for visible state transitions
+            if conclusion == "success":
+                add_labels(issue_number, ["ai:done"])
+                log({"event": "label_added", "issue": issue_number, "label": "ai:done"})
+            else:
+                add_labels(issue_number, ["ai:blocked"])
+                log({"event": "label_added", "issue": issue_number, "label": "ai:blocked"})
+
             break
+
 
         time.sleep(POLL_SECONDS)
 
 def main():
-    log({"event": "orchestrator_started"})
-    while True:
-        try:
-            issues = list_trigger_issues()
-            if issues:
-                process_issue(issues[0])
-            else:
-                log({"event": "no_trigger_issues"})
-        except Exception as e:
-            log({"event": "error", "message": str(e)})
+    log({"event": "orchestrator_started", "mode": "single-run"})
 
-        time.sleep(POLL_SECONDS)
+    try:
+        issues = list_trigger_issues()
+        if not issues:
+            log({"event": "no_trigger_issues"})
+            return
+
+        # Process exactly one issue, then exit
+        process_issue(issues[0])
+        log({"event": "single_run_complete"})
+        return
+
+    except Exception as e:
+        log({"event": "error", "message": str(e)})
+        return
 
 if __name__ == "__main__":
     main()
