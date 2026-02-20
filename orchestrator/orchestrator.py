@@ -1,5 +1,7 @@
 import os, time, json, requests
 from datetime import datetime, timezone
+from orchestrator.agent_ollama import generate_file_edits
+import base64
 
 OWNER = "ArrianTabatabai"
 REPO = "ai-agile-agents-demo"
@@ -86,55 +88,196 @@ def get_check_runs(sha: str):
 
     return {"status": "completed", "conclusion": "neutral", "runs": runs}
 
+def get_file_content(path: str, ref: str = BASE_BRANCH) -> str:
+    """Fetch a file from GitHub repo at a given ref (branch)."""
+    data = gh(repo_url(f"/contents/{path}"), params={"ref": ref})
+    if data.get("encoding") == "base64":
+        return base64.b64decode(data["content"]).decode("utf-8", errors="replace")
+    raise RuntimeError(f"Unexpected encoding for {path}")
+
+def upsert_file(branch: str, path: str, content: str, message: str):
+    """Create or update file on a branch using GitHub Contents API."""
+    b64 = base64.b64encode(content.encode("utf-8")).decode("utf-8")
+    url = repo_url(f"/contents/{path}")
+
+    # Try fetch existing file to get sha (required to update)
+    sha = None
+    try:
+        existing = gh(url, params={"ref": branch})
+        sha = existing.get("sha")
+    except RuntimeError as e:
+        if "404" not in str(e):
+            raise
+
+    payload = {
+        "message": message,
+        "content": b64,
+        "branch": branch,
+    }
+    if sha:
+        payload["sha"] = sha
+
+    gh(url, method="PUT", json=payload)
+
 def process_issue(issue):
     issue_number = issue["number"]
-    log({"event": "issue_detected", "issue": issue_number, "url": issue["html_url"]})
+    issue_title = issue.get("title") or f"Issue {issue_number}"
+    issue_body = issue.get("body") or ""
 
+    log({"event": "issue_detected", "issue": issue_number, "title": issue_title, "url": issue["html_url"]})
+
+    # Mark in-progress
     add_labels(issue_number, [IN_PROGRESS_LABEL])
     log({"event": "label_added", "issue": issue_number, "label": IN_PROGRESS_LABEL})
 
+    # Create branch from main
     base_sha = get_branch_head_sha(BASE_BRANCH)
     branch = f"ai/issue-{issue_number}"
     create_branch(branch, base_sha)
-    log({"event": "branch_created", "issue": issue_number, "branch": branch})
+    log({"event": "branch_created", "issue": issue_number, "branch": branch, "base_sha": base_sha})
 
-    note_path = f"ai_notes/issue-{issue_number}.md"
-    note = f"# Placeholder\n\nThis proves issue->branch->PR->CI.\n\nIssue: #{issue_number}\n"
-    create_file_on_branch(branch, note_path, note, f"AI: placeholder commit for issue #{issue_number}")
-    log({"event": "commit_pushed", "issue": issue_number, "branch": branch, "file": note_path})
+    # Minimal repo context bundle (keep small/reliable)
+    repo_context = {
+        "app/main.py": get_file_content("app/main.py", ref=BASE_BRANCH),
+        "tests/test_smoke.py": get_file_content("tests/test_smoke.py", ref=BASE_BRANCH),
+        "requirements.txt": get_file_content("requirements.txt", ref=BASE_BRANCH),
+    }
 
-    pr = open_pr(branch, f"AI: Placeholder PR for issue #{issue_number}", f"Automated PR for #{issue_number}.")
-    pr_num = pr["number"]
-    head_sha = pr["head"]["sha"]
-    log({"event": "pr_opened", "issue": issue_number, "pr": pr_num, "pr_url": pr["html_url"], "sha": head_sha})
+    max_attempts = 2
+    ci_feedback = None
+    pr_num = None
+    pr_url = None
+    head_sha = None
 
-    comment(issue_number, f"Opened PR: {pr['html_url']}")
-    log({"event": "issue_commented", "issue": issue_number})
+    for attempt in range(1, max_attempts + 1):
+        log({"event": "agent_attempt_start", "issue": issue_number, "attempt": attempt})
 
-    # Poll CI status
-    for i in range(30):
-        status = get_check_runs(head_sha)
-        log({"event": "ci_polled", "issue": issue_number, "pr": pr_num, "attempt": i+1,
-             "ci_status": status["status"], "ci_conclusion": status["conclusion"]})
+        # Ask local LLM (Ollama) for edits
+        result = generate_file_edits(
+            issue_title=issue_title,
+            issue_body=issue_body,
+            repo_files=repo_context,
+            ci_feedback=ci_feedback
+        )
 
-        if status["status"] == "completed" and status["conclusion"] in ("success", "failure"):
-            conclusion = status["conclusion"]
+        summary = (result.get("summary") or "").strip()
+        files = result["files"]
 
-            comment(issue_number, f"CI result: **{conclusion}**")
-            log({"event": "ci_final", "issue": issue_number, "pr": pr_num, "conclusion": conclusion})
+        # Guardrail: keep diffs small
+        if len(files) > 3:
+            log({"event": "guardrail_triggered", "issue": issue_number, "attempt": attempt,
+                 "reason": "too_many_files", "count": len(files)})
+            comment(issue_number, f"Blocked: model attempted to change too many files ({len(files)}).")
+            add_labels(issue_number, ["ai:blocked"])
+            return
 
-            # Label outcome for visible state transitions
-            if conclusion == "success":
-                add_labels(issue_number, ["ai:done"])
-                log({"event": "label_added", "issue": issue_number, "label": "ai:done"})
-            else:
+        changed_paths = []
+        for f in files:
+            path = f["path"].strip()
+            content = f["content"]
+
+            # Another guardrail: avoid weird paths
+            if path.startswith("/") or ".." in path:
+                log({"event": "guardrail_triggered", "issue": issue_number, "attempt": attempt,
+                     "reason": "invalid_path", "path": path})
+                comment(issue_number, f"Blocked: invalid file path from model: {path}")
                 add_labels(issue_number, ["ai:blocked"])
-                log({"event": "label_added", "issue": issue_number, "label": "ai:blocked"})
+                return
 
-            break
+            upsert_file(
+                branch=branch,
+                path=path,
+                content=content,
+                message=f"AI: attempt {attempt} for issue #{issue_number}"
+            )
+            changed_paths.append(path)
 
+        log({"event": "agent_changes_pushed", "issue": issue_number, "attempt": attempt,
+             "files": changed_paths, "summary": summary})
 
-        time.sleep(POLL_SECONDS)
+        # On attempt 1: open PR. On attempt 2: find existing PR.
+        if attempt == 1:
+            pr = open_pr(
+                branch,
+                f"AI: {issue_title} (#{issue_number})",
+                f"Automated PR for #{issue_number}.\n\nSummary: {summary}\n\nFiles: {', '.join(changed_paths)}"
+            )
+            pr_num = pr["number"]
+            pr_url = pr["html_url"]
+            head_sha = pr["head"]["sha"]
+
+            log({"event": "pr_opened", "issue": issue_number, "pr": pr_num, "pr_url": pr_url, "sha": head_sha})
+            comment(issue_number, f"Opened PR: {pr_url}")
+            log({"event": "issue_commented", "issue": issue_number, "comment": "PR link posted"})
+        else:
+            prs = gh(repo_url("/pulls"), params={"state": "open", "head": f"{OWNER}:{branch}"})
+            if not prs:
+                raise RuntimeError("Retry attempt: could not find existing open PR for branch.")
+            pr_num = prs[0]["number"]
+            pr_url = prs[0]["html_url"]
+            head_sha = prs[0]["head"]["sha"]
+
+            log({"event": "pr_found_for_retry", "issue": issue_number, "pr": pr_num, "pr_url": pr_url, "sha": head_sha})
+
+        # Poll CI status
+        final_conclusion = None
+        last_status = None
+        for poll in range(30):
+            status = get_check_runs(head_sha)
+            last_status = status
+            log({"event": "ci_polled", "issue": issue_number, "pr": pr_num, "attempt": attempt, "poll": poll + 1,
+                 "ci_status": status["status"], "ci_conclusion": status["conclusion"]})
+
+            if status["status"] == "completed" and status["conclusion"] in ("success", "failure"):
+                final_conclusion = status["conclusion"]
+                break
+
+            time.sleep(POLL_SECONDS)
+
+        # If CI never completed, treat as blocked (keeps Week 4 simple)
+        if final_conclusion is None:
+            comment(issue_number, f"Blocked: CI did not complete in time for PR {pr_url}")
+            add_labels(issue_number, ["ai:blocked"])
+            log({"event": "agent_blocked_ci_timeout", "issue": issue_number, "pr": pr_num})
+            return
+
+        # Success path
+        if final_conclusion == "success":
+            comment(issue_number, f"CI result: **success** (attempt {attempt})")
+            add_labels(issue_number, ["ai:done"])
+            log({"event": "agent_success", "issue": issue_number, "pr": pr_num, "attempt": attempt})
+            return
+
+        # Failure path (retry once)
+        comment(issue_number, f"CI result: **failure** (attempt {attempt})")
+        log({"event": "agent_ci_failure", "issue": issue_number, "pr": pr_num, "attempt": attempt})
+
+        if attempt < max_attempts:
+            # Give the model minimal, structured feedback based on check runs.
+            failed_runs = []
+            for r in (last_status.get("runs") or []):
+                name = r.get("name")
+                concl = r.get("conclusion")
+                if concl and concl != "success":
+                    failed_runs.append(f"{name}={concl}")
+
+            ci_feedback = "CI failed. Failed checks: " + (", ".join(failed_runs) if failed_runs else "unknown") + \
+                          ". Fix the code so `pytest -q` passes. Keep changes minimal."
+
+            # Refresh repo context from the BRANCH for files the model just edited,
+            # so attempt 2 sees the latest state.
+            for p in changed_paths:
+                try:
+                    repo_context[p] = get_file_content(p, ref=branch)
+                except Exception:
+                    pass
+
+            log({"event": "agent_retry_prepared", "issue": issue_number, "next_attempt": attempt + 1,
+                 "ci_feedback": ci_feedback})
+        else:
+            add_labels(issue_number, ["ai:blocked"])
+            log({"event": "agent_failed", "issue": issue_number, "pr": pr_num})
+            return
 
 def main():
     log({"event": "orchestrator_started", "mode": "single-run"})
