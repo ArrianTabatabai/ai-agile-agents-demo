@@ -1,4 +1,5 @@
 from app.main import add
+import pytest
 
 def test_add_valid():
     assert add(2, 3) == 5
