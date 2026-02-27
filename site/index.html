@@ -1,36 +1,26 @@
-<!doctype html>
-<html>
+<!DOCTYPE html>
+<html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <title>AI Agent Preview</title>
-  <style>
-    body { font-family: Arial, sans-serif; margin: 40px; }
-    .card { max-width: 520px; padding: 20px; border: 1px solid #ddd; border-radius: 12px; }
-    input { width: 120px; padding: 8px; margin-right: 8px; }
-    button { padding: 8px 12px; cursor: pointer; }
-    .out { margin-top: 14px; font-weight: bold; }
-  </style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Week 5 Demo</title>
+    <style>
+        body {
+            background-color: #f0f0f0;
+            font-family: Arial, sans-serif;
+        }
+        .card {
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            background-color: #ffffff;
+        }
+    </style>
 </head>
 <body>
-  <div class="card">
-    <h2>Preview Playground</h2>
-    <p>Use this to visually validate PR changes.</p>
-
-    <input id="a" type="number" value="2" />
-    <input id="b" type="number" value="3" />
-
-    <button onclick="run()">Compute</button>
-
-    <div class="out" id="out"></div>
-  </div>
-
-  <script>
-    function run() {
-      const a = Number(document.getElementById('a').value);
-      const b = Number(document.getElementById('b').value);
-      document.getElementById('out').innerText =
-        `a+b=${a+b}, a-b=${a-b}, a*b=${a*b}`;
-    }
-  </script>
+    <div class="card">
+        <h1>Welcome to Week 5 Demo</h1>
+        <p>This is a sample page.</p>
+    </div>
 </body>
 </html>
