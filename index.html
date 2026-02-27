@@ -1,0 +1,36 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>AI Agent Preview</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 40px; }
+    .card { max-width: 520px; padding: 20px; border: 1px solid #ddd; border-radius: 12px; }
+    input { width: 120px; padding: 8px; margin-right: 8px; }
+    button { padding: 8px 12px; cursor: pointer; }
+    .out { margin-top: 14px; font-weight: bold; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h2>Preview Playground</h2>
+    <p>Use this to visually validate PR changes.</p>
+
+    <input id="a" type="number" value="2" />
+    <input id="b" type="number" value="3" />
+
+    <button onclick="run()">Compute</button>
+
+    <div class="out" id="out"></div>
+  </div>
+
+  <script>
+    function run() {
+      const a = Number(document.getElementById('a').value);
+      const b = Number(document.getElementById('b').value);
+      document.getElementById('out').innerText =
+        `a+b=${a+b}, a-b=${a-b}, a*b=${a*b}`;
+    }
+  </script>
+</body>
+</html>
