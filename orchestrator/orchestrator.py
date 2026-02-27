@@ -244,6 +244,11 @@ def process_issue(issue):
         # Success path
         if final_conclusion == "success":
             comment(issue_number, f"CI result: **success** (attempt {attempt})")
+
+            preview_url = f"https://{OWNER}.github.io/{REPO}/pr-preview/pr-{pr_num}/"
+            comment(issue_number, f"✅ Preview deployed: {preview_url}\n\nHuman review: open the link and validate acceptance criteria.")
+            log({"event": "preview_link_posted", "issue": issue_number, "pr": pr_num, "preview_url": preview_url})
+
             add_labels(issue_number, ["ai:done"])
             log({"event": "agent_success", "issue": issue_number, "pr": pr_num, "attempt": attempt})
             return
