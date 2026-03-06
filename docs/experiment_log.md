@@ -1,0 +1,40 @@
+## Experiment Run: EXP-A (1 ticket)
+- Base branch: exp-A-1ticket
+- Model: qwen2.5-coder:7b (Ollama)
+- Start time:
+- End time:
+- Issue: <link>
+- PR: <link>
+- Preview link: <link>
+- Outcome: ai:done / ai:blocked
+- Retries used: 0 / 1
+- CI result: success/failure
+- AC coverage:
+  - AC1:
+  - AC2:
+  - AC3:
+  - AC4:
+  - AC5:
+  - AC6:
+- Notes / failure modes:
+
+## Experiment Run: EXP-B (3 tickets)
+- Base branch: exp-B-3ticket
+- Model: qwen2.5-coder:7b (Ollama)
+- Ticket 1:
+  - Issue:
+  - PR:
+  - Preview:
+  - Outcome:
+- Ticket 2:
+  - Issue:
+  - PR:
+  - Preview:
+  - Outcome:
+- Ticket 3:
+  - Issue:
+  - PR:
+  - Preview:
+  - Outcome:
+- Final AC coverage (same AC1–AC6):
+- Notes / failure modes:

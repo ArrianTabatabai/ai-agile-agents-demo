@@ -12,16 +12,17 @@ Return JSON in this exact shape:
 {
   "summary": "<short summary>",
   "files": [
-    {"path": "<repo-relative path>", "content": "<FULL file content>"},
+    {"path": "<repo-relative path>", "content_b64": "<BASE64 of full file content>"},
     ...
   ]
 }
 
 Rules:
+- content_b64 MUST be base64 of the full file contents (UTF-8).
+- Do NOT use triple quotes. Do NOT include raw multiline strings.
 - Only edit files that are necessary.
 - Keep changes small.
-- Do not invent new dependencies unless required.
-- Ensure tests pass with `pytest -q`.
+- Follow the Issue acceptance criteria exactly.
 """
 
 def call_ollama(prompt: str, temperature: float = 0.2) -> str:
@@ -72,7 +73,9 @@ OUTPUT REQUIREMENTS:
 - Prefer editing existing files over creating many new ones.
 """
 
-    raw = call_ollama(prompt)
+    raw = call_ollama(prompt, temperature=0.0)
+    with open("orchestrator/logs/last_model_output.txt", "w", encoding="utf-8") as f:
+        f.write(raw)
     # Be strict: JSON only
     try:
         result = json.loads(raw)
@@ -88,6 +91,6 @@ OUTPUT REQUIREMENTS:
     if "files" not in result or not isinstance(result["files"], list):
         raise ValueError("Model output missing 'files' list.")
     for f in result["files"]:
-        if "path" not in f or "content" not in f:
-            raise ValueError("Each file item must have 'path' and 'content'.")
+        if "path" not in f or "content_b64" not in f:
+            raise ValueError("Each file item must have 'path' and 'content_b64'.")
     return result

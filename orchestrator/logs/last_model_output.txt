@@ -1,0 +1,150 @@
+{
+  "summary": "Implement multi-rule evaluation and severity-based decisioning in loan decisioning system.",
+  "files": [
+    {
+      "path": "app/rules.py",
+      "content": """
+from typing import List, Dict
+
+def evaluate(rules: List[Dict], applicant_data: Dict) -> Dict:
+    triggered_rules = []
+    for rule in rules:
+        if all(rule.get('conditions', {}).get(key, False) == value for key, value in applicant_data.items()):
+            triggered_rules.append({
+                'rule_id': rule['id'],
+                'reason_ids': rule.get('reason_ids', []),
+                'decision': rule.get('decision', 'approve')
+            })
+    
+    # Sort by rule priority ascending
+    triggered_rules.sort(key=lambda x: rules.index(x))
+    
+    overall_decision = 'approve'
+    for rule in triggered_rules:
+        if rule['decision'] == 'reject':
+            overall_decision = 'reject'
+            break
+        elif rule['decision'] == 'refer':
+            overall_decision = 'refer'
+            break
+    
+    return {
+        'overall_decision': overall_decision,
+        'triggered_rules': triggered_rules
+    }
+"""
+    },
+    {
+      "path": "app/main.py",
+      "content": """
+from app.rules import evaluate
+
+def loan_decision(applicant_data: Dict) -> Dict:
+    rules = [
+        {'id': 1, 'conditions': {'income': '>50k'}, 'reason_ids': ['R1'], 'decision': 'approve'},
+        {'id': 2, 'conditions': {'credit_score': '<600'}, 'reason_ids': ['R2'], 'decision': 'reject'},
+        {'id': 3, 'conditions': {'employment_status': 'employed'}, 'reason_ids': ['R3'], 'decision': 'refer'}
+    ]
+    
+    return evaluate(rules, applicant_data)
+"""
+    },
+    {
+      "path": "docs/golden_cases.json",
+      "content": """
+[
+    {
+        "id": 1,
+        "applicant_data": {
+            "income": "60k",
+            "credit_score": "550",
+            "employment_status": "employed"
+        },
+        "expected_decision": "approve",
+        "expected_reason_ids": ["R3"]
+    },
+    {
+        "id": 2,
+        "applicant_data": {
+            "income": "40k",
+            "credit_score": "650",
+            "employment_status": "self-employed"
+        },
+        "expected_decision": "refer",
+        "expected_reason_ids": ["R1", "R3"]
+    }
+]
+"""
+    },
+    {
+      "path": "tests/test_rules.py",
+      "content": """
+from app.rules import evaluate
+
+def test_multi_rule_case():
+    applicant_data = {
+        "income": "60k",
+        "credit_score": "550",
+        "employment_status": "employed"
+    }
+    
+    result = evaluate([
+        {'id': 1, 'conditions': {'income': '>50k'}, 'reason_ids': ['R1'], 'decision': 'approve'},
+        {'id': 2, 'conditions': {'credit_score': '<600'}, 'reason_ids': ['R2'], 'decision': 'reject'},
+        {'id': 3, 'conditions': {'employment_status': 'employed'}, 'reason_ids': ['R3'], 'decision': 'refer'}
+    ], applicant_data)
+    
+    assert result['overall_decision'] == 'approve'
+    assert result['triggered_rules'] == [
+        {'rule_id': 1, 'reason_ids': ['R1'], 'decision': 'approve'},
+        {'rule_id': 3, 'reason_ids': ['R3'], 'decision': 'refer'}
+    ]
+"""
+    },
+    {
+      "path": "site/index.html",
+      "content": """
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Loan Decisioning System</title>
+</head>
+<body>
+    <h1>Loan Decisioning System</h1>
+    <select id="applicant-data" onchange="updateDecision()">
+        <option value='{"income": "60k", "credit_score": "550", "employment_status": "employed"}'>Case 1</option>
+        <option value='{"income": "40k", "credit_score": "650", "employment_status": "self-employed"}'>Case 2</option>
+    </select>
+    <div id="decision"></div>
+    <ul id="triggered-rules"></ul>
+
+    <script>
+        function updateDecision() {
+            const applicantData = JSON.parse(document.getElementById('applicant-data').value);
+            fetch('/api/loan_decision', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(applicantData)
+            })
+            .then(response => response.json())
+            .then(data => {
+                document.getElementById('decision').innerText = `Overall Decision: ${data.overall_decision}`;
+                const triggeredRulesList = document.getElementById('triggered-rules');
+                triggeredRulesList.innerHTML = '';
+                data.triggered_rules.forEach(rule => {
+                    const li = document.createElement('li');
+                    li.innerText = `Rule ID: ${rule.rule_id}, Reason IDs: ${rule.reason_ids.join(', ')}`;
+                    triggeredRulesList.appendChild(li);
+                });
+            });
+        }
+    </script>
+</body>
+</html>
+"""
+    }
+  ]
+}
