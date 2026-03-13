@@ -1,7 +1,13 @@
 import os, time, json, requests
 from datetime import datetime, timezone
-from orchestrator.agent_ollama import generate_file_edits
 import base64
+
+AGENT_BACKEND = os.environ.get("AGENT_BACKEND", "ollama").lower()
+
+if AGENT_BACKEND == "openai":
+    from orchestrator.agent_openai import generate_file_edits
+else:
+    from orchestrator.agent_ollama import generate_file_edits
 
 OWNER = "ArrianTabatabai"
 REPO = "ai-agile-agents-demo"
