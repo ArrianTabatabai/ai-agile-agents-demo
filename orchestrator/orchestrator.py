@@ -150,21 +150,14 @@ def process_issue(issue):
         # Minimal repo context bundle (keep small/reliable)
         repo_context = {
             "app/rules.py": get_file_content("app/rules.py", ref=BASE_BRANCH),
-            "tests/test_rules.py": get_file_content("tests/test_rules.py", ref=BASE_BRANCH),
             "docs/policy.json": get_file_content("docs/policy.json", ref=BASE_BRANCH),
-            "docs/golden_cases.json": get_file_content("docs/golden_cases.json", ref=BASE_BRANCH),
             "site/index.html": get_file_content("site/index.html", ref=BASE_BRANCH),
         }
 
         # Allowlist: prevent hallucinated file changes
         ALLOWED_PATHS = {
             "app/rules.py",
-            "tests/test_rules.py",
-            "docs/policy.json",
-            "docs/golden_cases.json",
             "site/index.html",
-            "site/data/policy.json",
-            "site/data/golden_cases.json",
         }
 
         max_attempts = 2

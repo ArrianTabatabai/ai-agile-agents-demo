@@ -47,6 +47,8 @@ ISSUE BODY:
 REPO CONTEXT:
 {files_block}
 
+Note: CI runs hidden tests. You cannot modify tests or policy. Ensure changes are robust.
+
 Return ONLY the JSON object described in the system prompt.
 """
 
