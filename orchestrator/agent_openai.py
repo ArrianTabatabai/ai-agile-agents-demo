@@ -9,22 +9,23 @@ client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
 MODEL = os.environ.get("OPENAI_MODEL", "gpt-5-nano")
 
 SYSTEM_PROMPT = """You are a careful software engineer.
-Output ONLY valid JSON (no markdown, no commentary).
+Output ONLY valid JSON (no markdown, no commentary, no trailing text).
 
-Schema:
+You MUST follow this schema exactly:
 {
   "summary": "<short summary>",
   "files": [
-    {"path": "<repo-relative path>", "content_b64": "<BASE64 of full UTF-8 file content>"},
+    {"path": "<repo-relative path>", "content_b64": "<BASE64 ONLY>"},
     ...
   ]
 }
 
-Rules:
-- content_b64 MUST be base64(utf-8 full file content).
+Hard rules:
+- content_b64 must be STANDARD base64 of the full UTF-8 file content.
+- content_b64 must contain ONLY characters: A-Z a-z 0-9 + / =
+- Do NOT include whitespace or newlines in content_b64.
 - Do NOT use triple quotes.
 - Keep changes small and focused.
-- Follow the Issue acceptance criteria exactly.
 """
 
 def generate_file_edits(
@@ -48,6 +49,8 @@ REPO CONTEXT:
 {files_block}
 
 Note: CI runs hidden tests. You cannot modify tests or policy. Ensure changes are robust.
+
+Before returning JSON, ensure every content_b64 is valid base64 with correct '=' padding and no newlines.
 
 Return ONLY the JSON object described in the system prompt.
 """

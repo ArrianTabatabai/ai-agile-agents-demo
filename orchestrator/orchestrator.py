@@ -125,6 +125,15 @@ def upsert_file(branch: str, path: str, content: str, message: str):
 
     gh(url, method="PUT", json=payload)
 
+def safe_b64decode_to_text(b64_str: str) -> str:
+    # Remove whitespace/newlines just in case
+    s = "".join(b64_str.split())
+    # Fix missing padding
+    missing = (-len(s)) % 4
+    if missing:
+        s += "=" * missing
+    return base64.b64decode(s).decode("utf-8", errors="replace")
+
 def process_issue(issue):
     issue_number = issue.get("number", None)
     pr_num = None
@@ -223,7 +232,7 @@ def process_issue(issue):
 
                 # Decode base64 file content from the model
                 try:
-                    content = base64.b64decode(f["content_b64"]).decode("utf-8", errors="replace")
+                    content = safe_b64decode_to_text(f["content_b64"])
                 except Exception as decode_err:
                     log({
                         "event": "guardrail_triggered",
