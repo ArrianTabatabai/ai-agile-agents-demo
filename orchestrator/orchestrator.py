@@ -134,6 +134,28 @@ def safe_b64decode_to_text(b64_str: str) -> str:
         s += "=" * missing
     return base64.b64decode(s).decode("utf-8", errors="replace")
 
+def get_latest_ci_feedback_from_issue(issue_number: int) -> str | None:
+    """
+    Looks for the most recent issue comment starting with 'CI_FEEDBACK:' and returns the rest.
+    """
+    comments = gh(repo_url(f"/issues/{issue_number}/comments"), params={"per_page": 50})
+    # comments returned oldest->newest usually; iterate reverse
+    for c in reversed(comments):
+        body = (c.get("body") or "").strip()
+        if body.startswith("CI_FEEDBACK:"):
+            return body[len("CI_FEEDBACK:"):].strip()
+    return None
+
+def contains_nonprintable(s: str) -> bool:
+    # allow common whitespace: \n \r \t
+    for ch in s:
+        o = ord(ch)
+        if o == 9 or o == 10 or o == 13:
+            continue
+        if o < 32:
+            return True
+    return False
+
 def process_issue(issue):
     issue_number = issue.get("number", None)
     pr_num = None
@@ -245,6 +267,21 @@ def process_issue(issue):
                     comment(issue_number, f"Blocked: could not decode content for {path}")
                     add_labels(issue_number, ["ai:blocked"])
                     return
+                
+                # Guardrail: don't allow wiping the UI file
+                if path == "site/index.html" and len(content.strip()) < 200:
+                    log({"event": "guardrail_triggered", "issue": issue_number, "attempt": attempt,
+                        "reason": "index_html_too_small", "chars": len(content.strip())})
+                    comment(issue_number, "Blocked: attempted to overwrite site/index.html with very small/empty content.")
+                    add_labels(issue_number, ["ai:blocked"])
+                    return
+                
+                if path.endswith(".py") and contains_nonprintable(content):
+                    log({"event": "guardrail_triggered", "issue": issue_number, "attempt": attempt,
+                        "reason": "nonprintable_in_python", "path": path})
+                    comment(issue_number, f"Blocked: non-printable characters detected in {path}.")
+                    add_labels(issue_number, ["ai:blocked"])
+                    return
 
                 upsert_file(
                     branch=branch,
@@ -332,17 +369,22 @@ def process_issue(issue):
             log({"event": "agent_ci_failure", "issue": issue_number, "pr": pr_num, "attempt": attempt})
 
             if attempt < max_attempts:
-                failed_runs = []
-                for r in (last_status.get("runs") or []):
-                    name = r.get("name")
-                    concl = r.get("conclusion")
-                    if concl and concl != "success":
-                        failed_runs.append(f"{name}={concl}")
+                # First: try to use human-provided CI feedback if present (counts as intervention in Tests 3/4)
+                human_ci = get_latest_ci_feedback_from_issue(issue_number)
+                if human_ci:
+                    ci_feedback = f"CI failed with the following error output:\n{human_ci}\n\nFix the code so `pytest -q` passes. Keep changes minimal."
+                else:
+                    failed_runs = []
+                    for r in (last_status.get("runs") or []):
+                        name = r.get("name")
+                        concl = r.get("conclusion")
+                        if concl and concl != "success":
+                            failed_runs.append(f"{name}={concl}")
 
-                ci_feedback = (
-                    "CI failed. Failed checks: " + (", ".join(failed_runs) if failed_runs else "unknown") +
-                    ". Fix the code so `pytest -q` passes. Keep changes minimal."
-                )
+                    ci_feedback = (
+                        "CI failed. Failed checks: " + (", ".join(failed_runs) if failed_runs else "unknown") +
+                        ". Fix the code so `pytest -q` passes. Keep changes minimal."
+                    )
 
                 # Refresh repo context from the BRANCH for edited files so retry sees latest state
                 for p in changed_paths:
