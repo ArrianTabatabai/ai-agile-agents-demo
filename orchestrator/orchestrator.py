@@ -11,7 +11,7 @@ else:
 
 OWNER = "ArrianTabatabai"
 REPO = "ai-agile-agents-demo"
-BASE_BRANCH = "main"
+BASE_BRANCH = os.environ.get("BASE_BRANCH", "main")
 
 TRIGGER_LABEL = "ai:dev"
 IN_PROGRESS_LABEL = "ai:in-progress"
