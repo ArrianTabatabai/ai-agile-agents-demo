@@ -156,6 +156,15 @@ def contains_nonprintable(s: str) -> bool:
             return True
     return False
 
+def strip_control_chars(s: str) -> str:
+    # Keep \n, \r, \t. Remove other ASCII control chars (0-31).
+    out = []
+    for ch in s:
+        o = ord(ch)
+        if o in (9, 10, 13) or o >= 32:
+            out.append(ch)
+    return "".join(out)
+
 def process_issue(issue):
     issue_number = issue.get("number", None)
     pr_num = None
@@ -283,12 +292,18 @@ def process_issue(issue):
                     add_labels(issue_number, ["ai:blocked"])
                     return
                 
-                if path.endswith(".py") and contains_nonprintable(content):
-                    log({"event": "guardrail_triggered", "issue": issue_number, "attempt": attempt,
-                        "reason": "nonprintable_in_python", "path": path})
-                    comment(issue_number, f"Blocked: non-printable characters detected in {path}.")
-                    add_labels(issue_number, ["ai:blocked"])
-                    return
+                if path.endswith(".py"):
+                    cleaned = strip_control_chars(content)
+                    if cleaned != content:
+                        log({"event": "sanitized_nonprintable", "issue": issue_number, "attempt": attempt, "path": path})
+                        content = cleaned
+                        # After sanitizing, check again. If still nonprintable, block.
+                        if contains_nonprintable(content):
+                            log({"event": "guardrail_triggered", "issue": issue_number, "attempt": attempt,
+                                "reason": "nonprintable_in_python_after_sanitize", "path": path})
+                            comment(issue_number, f"Blocked: non-printable characters still detected in {path} after sanitizing.")
+                            add_labels(issue_number, ["ai:blocked"])
+                            return
 
                 upsert_file(
                     branch=branch,
