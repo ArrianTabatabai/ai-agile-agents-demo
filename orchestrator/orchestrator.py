@@ -209,6 +209,13 @@ def process_issue(issue):
             summary = (result.get("summary") or "").strip()
             files = result["files"]
 
+            # Guardrail: no-op output (prevents GitHub 422 "No commits between...")
+            if not files:
+                log({"event": "guardrail_triggered", "issue": issue_number, "attempt": attempt, "reason": "no_op"})
+                comment(issue_number, "Blocked: model produced no file changes (no-op), so no PR can be created. Please refine requirements or provide CI_FEEDBACK.")
+                add_labels(issue_number, ["ai:blocked"])
+                return
+
             # Guardrail: keep diffs small (files touched)
             if len(files) > 3:
                 log({
