@@ -324,12 +324,34 @@ def process_issue(issue):
                             return
                         
                 # Guardrail: prevent destructive rewrites of Python files
-                if path.endswith(".py") and is_destructive_shrink(path, content, BASE_BRANCH, threshold=0.60):
-                    log({"event": "guardrail_triggered", "issue": issue_number, "attempt": attempt,
-                        "reason": "destructive_rewrite_shrink", "path": path})
-                    comment(issue_number, f"Blocked: destructive rewrite detected for {path} (file shrank >60%).")
-                    add_labels(issue_number, ["ai:blocked"])
-                    return
+                if path.endswith(".py"):
+                    # Special-case rules.py: allow rewrites ONLY if required public functions remain
+                    if path == "app/rules.py":
+                        must_have = ["def load_policy", "def evaluate"]
+                        missing = [m for m in must_have if m not in content]
+                        if missing:
+                            log({"event": "guardrail_triggered", "issue": issue_number, "attempt": attempt,
+                                "reason": "missing_required_symbols", "path": path, "missing": missing})
+                            comment(issue_number, f"Blocked: app/rules.py missing required definitions: {', '.join(missing)}")
+                            add_labels(issue_number, ["ai:blocked"])
+                            return
+
+                        # If functions exist, still block extreme shrink (optional safety)
+                        if is_destructive_shrink(path, content, BASE_BRANCH, threshold=0.60):
+                            log({"event": "guardrail_triggered", "issue": issue_number, "attempt": attempt,
+                                "reason": "destructive_rewrite_shrink", "path": path})
+                            comment(issue_number, f"Blocked: destructive rewrite detected for {path} (file shrank >60%).")
+                            add_labels(issue_number, ["ai:blocked"])
+                            return
+
+                    else:
+                        # For other python files, keep original shrink guardrail
+                        if is_destructive_shrink(path, content, BASE_BRANCH, threshold=0.60):
+                            log({"event": "guardrail_triggered", "issue": issue_number, "attempt": attempt,
+                                "reason": "destructive_rewrite_shrink", "path": path})
+                            comment(issue_number, f"Blocked: destructive rewrite detected for {path} (file shrank >60%).")
+                            add_labels(issue_number, ["ai:blocked"])
+                            return
 
                 upsert_file(
                     branch=branch,
