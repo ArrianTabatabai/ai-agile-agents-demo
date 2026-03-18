@@ -8,25 +8,42 @@ client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
 
 MODEL = os.environ.get("OPENAI_MODEL", "gpt-5-nano")
 
-SYSTEM_PROMPT = """You are a careful software engineer.
-Output ONLY valid JSON (no markdown, no commentary, no trailing text).
+SYSTEM_PROMPT = """Output ONLY this format:
 
-You MUST follow this schema exactly:
+<JSON>
+{...valid JSON...}
+</JSON>
+
+The JSON schema must be:
 {
   "summary": "<short summary>",
   "files": [
-    {"path": "<repo-relative path>", "content_b64": "<BASE64 ONLY>"},
+    {"path": "<repo-relative path>", "content_b64": "<base64 UTF-8 full content>"},
     ...
   ]
 }
 
-Hard rules:
-- content_b64 must be STANDARD base64 of the full UTF-8 file content.
-- content_b64 must contain ONLY characters: A-Z a-z 0-9 + / =
-- Do NOT include whitespace or newlines in content_b64.
-- Do NOT use triple quotes.
-- Keep changes small and focused.
+Rules:
+- content_b64 must contain ONLY base64 characters A-Z a-z 0-9 + / =
+- No whitespace/newlines in content_b64.
+- No extra keys.
+- Do not create new files.
+- Only edit allowed files.
 """
+
+def extract_json_block(text: str) -> str:
+    start_tag = "<JSON>"
+    end_tag = "</JSON>"
+    start = text.find(start_tag)
+    end = text.rfind(end_tag)
+    if start == -1 or end == -1:
+        # fallback: try raw {...}
+        s = text.find("{")
+        e = text.rfind("}")
+        if s == -1 or e == -1:
+            raise ValueError("No JSON block found in model output.")
+        return text[s:e+1]
+    return text[start+len(start_tag):end].strip()
 
 def generate_file_edits(
     issue_title: str,
@@ -63,13 +80,15 @@ Return ONLY the JSON object described in the system prompt.
     )
     text = resp.output_text
 
-    # Parse strict JSON
+    # Parse strict JSON from the <JSON>...</JSON> wrapper
+    json_text = extract_json_block(text)
+
     try:
-        return json.loads(text)
+        return json.loads(json_text)
     except json.JSONDecodeError:
-        # Attempt salvage if there is leading/trailing noise
-        start = text.find("{")
-        end = text.rfind("}")
+        # Fallback salvage: last-resort trim to {...} inside extracted block
+        start = json_text.find("{")
+        end = json_text.rfind("}")
         if start == -1 or end == -1:
             raise
-        return json.loads(text[start:end+1])
+        return json.loads(json_text[start:end+1])
