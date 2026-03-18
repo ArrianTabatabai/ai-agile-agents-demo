@@ -165,6 +165,24 @@ def strip_control_chars(s: str) -> str:
             out.append(ch)
     return "".join(out)
 
+def is_destructive_shrink(path: str, new_content: str, base_ref: str, threshold: float = 0.60) -> bool:
+    """
+    Returns True if new_content is >threshold shorter than the base version by character length.
+    threshold=0.60 => block if new_len < 40% of old_len.
+    """
+    try:
+        old_content = get_file_content(path, ref=base_ref)
+    except Exception:
+        return False  # If file doesn't exist on base, don't apply this check.
+
+    old_len = len(old_content)
+    new_len = len(new_content)
+
+    if old_len <= 0:
+        return False
+
+    return new_len < (1.0 - threshold) * old_len
+
 def process_issue(issue):
     issue_number = issue.get("number", None)
     pr_num = None
@@ -304,6 +322,14 @@ def process_issue(issue):
                             comment(issue_number, f"Blocked: non-printable characters still detected in {path} after sanitizing.")
                             add_labels(issue_number, ["ai:blocked"])
                             return
+                        
+                # Guardrail: prevent destructive rewrites of Python files
+                if path.endswith(".py") and is_destructive_shrink(path, content, BASE_BRANCH, threshold=0.60):
+                    log({"event": "guardrail_triggered", "issue": issue_number, "attempt": attempt,
+                        "reason": "destructive_rewrite_shrink", "path": path})
+                    comment(issue_number, f"Blocked: destructive rewrite detected for {path} (file shrank >60%).")
+                    add_labels(issue_number, ["ai:blocked"])
+                    return
 
                 upsert_file(
                     branch=branch,
