@@ -17,6 +17,8 @@ Return JSON in this exact shape:
   ]
 }
 
+Note: CI runs hidden tests. You cannot modify tests or policy. Ensure changes are robust.
+
 Rules:
 - content_b64 MUST be base64 of the full file contents (UTF-8).
 - Do NOT use triple quotes. Do NOT include raw multiline strings.
@@ -35,7 +37,7 @@ def call_ollama(prompt: str, temperature: float = 0.2) -> str:
             "temperature": temperature
         }
     }
-    r = requests.post(OLLAMA_URL, json=payload, timeout=180)
+    r = requests.post(OLLAMA_URL, json=payload, timeout=600)
     r.raise_for_status()
     data = r.json()
     return data["response"]
