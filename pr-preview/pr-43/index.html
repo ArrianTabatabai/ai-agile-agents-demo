@@ -1,0 +1,148 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Loan Decisioning Preview</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 40px; background: #f6f7f8; }
+    .card { max-width: 820px; padding: 20px; border: 1px solid #ddd; border-radius: 12px; background: white; box-shadow: 0 6px 20px rgba(0,0,0,0.06); }
+    select, input { padding: 8px; margin: 6px 8px 6px 0; }
+    button { padding: 8px 12px; cursor: pointer; }
+    .row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+    .badge { display: inline-block; padding: 6px 10px; border-radius: 999px; font-weight: bold; }
+    .approve { background: #e7f7ed; color: #1b7a3a; }
+    .reject { background: #fdeaea; color: #b42318; }
+    .refer { background: #fff6db; color: #8a5b00; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono"; }
+    .small { color: #555; font-size: 13px; }
+    ul { margin-top: 8px; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h2>Loan Decisioning Preview</h2>
+    <p class="small">PO validation happens here: choose a golden case, click “Evaluate”, confirm decision & reasons.</p>
+
+    <div class="row">
+      <label>Golden case:</label>
+      <select id="caseSelect"></select>
+      <button onclick="run()">Evaluate</button>
+    </div>
+
+    <h3>Applicant</h3>
+    <div class="row small mono" id="applicantView"></div>
+
+    <h3>Decision</h3>
+    <div id="decisionLine"></div>
+    <div id="reasonsBlock"></div>
+
+    <hr />
+    <div class="small">
+      Policy version: <span id="policyVersion" class="mono"></span>
+    </div>
+  </div>
+
+  <script>
+    let policy = null;
+    let cases = [];
+
+    function matches(conditions, applicant) {
+      for (const [key, value] of Object.entries(conditions)) {
+        if (key.endsWith("_lt")) {
+          const field = key.slice(0, -3);
+          if (!(field in applicant) || Number(applicant[field]) >= Number(value)) return false;
+        } else if (key.endsWith("_gt")) {
+          const field = key.slice(0, -3);
+          if (!(field in applicant) || Number(applicant[field]) <= Number(value)) return false;
+        } else if (key.endsWith("_eq")) {
+          const field = key.slice(0, -3);
+          if (applicant[field] !== value) return false;
+        } else {
+          if (applicant[key] !== value) return false;
+        }
+      }
+      return true;
+    }
+
+    function evaluate(applicant, policy) {
+      const rules = [...(policy.rules || [])].sort((a,b) => (a.priority ?? 999999) - (b.priority ?? 999999));
+      const reason_ids = [];
+      const reasons = [];
+      const matched_decisions = [];
+
+      for (const rule of rules) {
+        if (matches(rule.conditions || {}, applicant)) {
+          reason_ids.push(rule.id);
+          reasons.push(rule.reason);
+          matched_decisions.push(rule.decision);
+        }
+      }
+
+      if (reason_ids.length === 0) {
+        return { decision: policy.default_decision || "approve", reason_ids: [], reasons: [] };
+      }
+
+      // Severity: reject > refer > approve
+      let overall = "approve";
+      if (matched_decisions.some(d => d === "reject")) {
+        overall = "reject";
+      } else if (matched_decisions.some(d => d === "refer")) {
+        overall = "refer";
+      }
+
+      return { decision: overall, reason_ids: reason_ids, reasons: reasons };
+    }
+
+    function badge(decision) {
+      const cls = decision === "approve" ? "approve" : decision === "reject" ? "reject" : "refer";
+      return `<span class="badge ${cls}">${decision.toUpperCase()}</span>`;
+    }
+
+    function renderApplicant(app) {
+      const parts = Object.entries(app).map(([k,v]) => `${k}: ${v}`);
+      document.getElementById("applicantView").innerText = parts.join(" | ");
+    }
+
+    function renderDecision(out) {
+      document.getElementById("decisionLine").innerHTML = badge(out.decision);
+      if (out.reasons.length === 0) {
+        document.getElementById("reasonsBlock").innerHTML = `<div class="small">No rule triggered.</div>`;
+      } else {
+        const items = out.reason_ids.map((id, i) => `<li><span class="mono">${id}</span> — ${out.reasons[i]}</li>`).join("");
+        document.getElementById("reasonsBlock").innerHTML = `<ul>${items}</ul>`;
+      }
+    }
+
+    async function loadData() {
+      const p = await fetch("data/policy.json").then(r => r.json());
+      const c = await fetch("data/golden_cases.json").then(r => r.json());
+      policy = p;
+      cases = c;
+
+      document.getElementById("policyVersion").innerText = policy.version || "unknown";
+
+      const select = document.getElementById("caseSelect");
+      select.innerHTML = "";
+      cases.forEach((cs, idx) => {
+        const opt = document.createElement("option");
+        opt.value = idx;
+        opt.textContent = cs.name;
+        select.appendChild(opt);
+      });
+
+      // default render first case
+      renderApplicant(cases[0].input);
+      renderDecision(evaluate(cases[0].input, policy));
+    }
+
+    function run() {
+      const idx = Number(document.getElementById("caseSelect").value);
+      const cs = cases[idx];
+      renderApplicant(cs.input);
+      renderDecision(evaluate(cs.input, policy));
+    }
+
+    loadData();
+  </script>
+</body>
+</html>
