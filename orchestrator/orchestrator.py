@@ -11,7 +11,7 @@ else:
 
 OWNER = "ArrianTabatabai"
 REPO = "ai-agile-agents-demo"
-BASE_BRANCH = "main"
+BASE_BRANCH = os.environ.get("BASE_BRANCH", "main")
 
 TRIGGER_LABEL = "ai:dev"
 IN_PROGRESS_LABEL = "ai:in-progress"
@@ -125,6 +125,64 @@ def upsert_file(branch: str, path: str, content: str, message: str):
 
     gh(url, method="PUT", json=payload)
 
+def safe_b64decode_to_text(b64_str: str) -> str:
+    # Remove whitespace/newlines just in case
+    s = "".join(b64_str.split())
+    # Fix missing padding
+    missing = (-len(s)) % 4
+    if missing:
+        s += "=" * missing
+    return base64.b64decode(s).decode("utf-8", errors="replace")
+
+def get_latest_ci_feedback_from_issue(issue_number: int) -> str | None:
+    """
+    Looks for the most recent issue comment starting with 'CI_FEEDBACK:' and returns the rest.
+    """
+    comments = gh(repo_url(f"/issues/{issue_number}/comments"), params={"per_page": 50})
+    # comments returned oldest->newest usually; iterate reverse
+    for c in reversed(comments):
+        body = (c.get("body") or "").strip()
+        if body.startswith("CI_FEEDBACK:"):
+            return body[len("CI_FEEDBACK:"):].strip()
+    return None
+
+def contains_nonprintable(s: str) -> bool:
+    # allow common whitespace: \n \r \t
+    for ch in s:
+        o = ord(ch)
+        if o == 9 or o == 10 or o == 13:
+            continue
+        if o < 32:
+            return True
+    return False
+
+def strip_control_chars(s: str) -> str:
+    # Keep \n, \r, \t. Remove other ASCII control chars (0-31).
+    out = []
+    for ch in s:
+        o = ord(ch)
+        if o in (9, 10, 13) or o >= 32:
+            out.append(ch)
+    return "".join(out)
+
+def is_destructive_shrink(path: str, new_content: str, base_ref: str, threshold: float = 0.60) -> bool:
+    """
+    Returns True if new_content is >threshold shorter than the base version by character length.
+    threshold=0.60 => block if new_len < 40% of old_len.
+    """
+    try:
+        old_content = get_file_content(path, ref=base_ref)
+    except Exception:
+        return False  # If file doesn't exist on base, don't apply this check.
+
+    old_len = len(old_content)
+    new_len = len(new_content)
+
+    if old_len <= 0:
+        return False
+
+    return new_len < (1.0 - threshold) * old_len
+
 def process_issue(issue):
     issue_number = issue.get("number", None)
     pr_num = None
@@ -150,21 +208,14 @@ def process_issue(issue):
         # Minimal repo context bundle (keep small/reliable)
         repo_context = {
             "app/rules.py": get_file_content("app/rules.py", ref=BASE_BRANCH),
-            "tests/test_rules.py": get_file_content("tests/test_rules.py", ref=BASE_BRANCH),
             "docs/policy.json": get_file_content("docs/policy.json", ref=BASE_BRANCH),
-            "docs/golden_cases.json": get_file_content("docs/golden_cases.json", ref=BASE_BRANCH),
             "site/index.html": get_file_content("site/index.html", ref=BASE_BRANCH),
         }
 
         # Allowlist: prevent hallucinated file changes
         ALLOWED_PATHS = {
             "app/rules.py",
-            "tests/test_rules.py",
-            "docs/policy.json",
-            "docs/golden_cases.json",
             "site/index.html",
-            "site/data/policy.json",
-            "site/data/golden_cases.json",
         }
 
         max_attempts = 2
@@ -184,6 +235,13 @@ def process_issue(issue):
 
             summary = (result.get("summary") or "").strip()
             files = result["files"]
+
+            # Guardrail: no-op output (prevents GitHub 422 "No commits between...")
+            if not files:
+                log({"event": "guardrail_triggered", "issue": issue_number, "attempt": attempt, "reason": "no_op"})
+                comment(issue_number, "Blocked: model produced no file changes (no-op), so no PR can be created. Please refine requirements or provide CI_FEEDBACK.")
+                add_labels(issue_number, ["ai:blocked"])
+                return
 
             # Guardrail: keep diffs small (files touched)
             if len(files) > 3:
@@ -230,7 +288,7 @@ def process_issue(issue):
 
                 # Decode base64 file content from the model
                 try:
-                    content = base64.b64decode(f["content_b64"]).decode("utf-8", errors="replace")
+                    content = safe_b64decode_to_text(f["content_b64"])
                 except Exception as decode_err:
                     log({
                         "event": "guardrail_triggered",
@@ -243,6 +301,57 @@ def process_issue(issue):
                     comment(issue_number, f"Blocked: could not decode content for {path}")
                     add_labels(issue_number, ["ai:blocked"])
                     return
+                
+                # Guardrail: don't allow wiping the UI file
+                if path == "site/index.html" and len(content.strip()) < 200:
+                    log({"event": "guardrail_triggered", "issue": issue_number, "attempt": attempt,
+                        "reason": "index_html_too_small", "chars": len(content.strip())})
+                    comment(issue_number, "Blocked: attempted to overwrite site/index.html with very small/empty content.")
+                    add_labels(issue_number, ["ai:blocked"])
+                    return
+                
+                if path.endswith(".py"):
+                    cleaned = strip_control_chars(content)
+                    if cleaned != content:
+                        log({"event": "sanitized_nonprintable", "issue": issue_number, "attempt": attempt, "path": path})
+                        content = cleaned
+                        # After sanitizing, check again. If still nonprintable, block.
+                        if contains_nonprintable(content):
+                            log({"event": "guardrail_triggered", "issue": issue_number, "attempt": attempt,
+                                "reason": "nonprintable_in_python_after_sanitize", "path": path})
+                            comment(issue_number, f"Blocked: non-printable characters still detected in {path} after sanitizing.")
+                            add_labels(issue_number, ["ai:blocked"])
+                            return
+                        
+                # Guardrail: prevent destructive rewrites of Python files
+                if path.endswith(".py"):
+                    # Special-case rules.py: allow rewrites ONLY if required public functions remain
+                    if path == "app/rules.py":
+                        must_have = ["def load_policy", "def evaluate"]
+                        missing = [m for m in must_have if m not in content]
+                        if missing:
+                            log({"event": "guardrail_triggered", "issue": issue_number, "attempt": attempt,
+                                "reason": "missing_required_symbols", "path": path, "missing": missing})
+                            comment(issue_number, f"Blocked: app/rules.py missing required definitions: {', '.join(missing)}")
+                            add_labels(issue_number, ["ai:blocked"])
+                            return
+
+                        # If functions exist, still block extreme shrink (optional safety)
+                        if is_destructive_shrink(path, content, BASE_BRANCH, threshold=0.60):
+                            log({"event": "guardrail_triggered", "issue": issue_number, "attempt": attempt,
+                                "reason": "destructive_rewrite_shrink", "path": path})
+                            comment(issue_number, f"Blocked: destructive rewrite detected for {path} (file shrank >60%).")
+                            add_labels(issue_number, ["ai:blocked"])
+                            return
+
+                    else:
+                        # For other python files, keep original shrink guardrail
+                        if is_destructive_shrink(path, content, BASE_BRANCH, threshold=0.60):
+                            log({"event": "guardrail_triggered", "issue": issue_number, "attempt": attempt,
+                                "reason": "destructive_rewrite_shrink", "path": path})
+                            comment(issue_number, f"Blocked: destructive rewrite detected for {path} (file shrank >60%).")
+                            add_labels(issue_number, ["ai:blocked"])
+                            return
 
                 upsert_file(
                     branch=branch,
@@ -330,17 +439,22 @@ def process_issue(issue):
             log({"event": "agent_ci_failure", "issue": issue_number, "pr": pr_num, "attempt": attempt})
 
             if attempt < max_attempts:
-                failed_runs = []
-                for r in (last_status.get("runs") or []):
-                    name = r.get("name")
-                    concl = r.get("conclusion")
-                    if concl and concl != "success":
-                        failed_runs.append(f"{name}={concl}")
+                # First: try to use human-provided CI feedback if present (counts as intervention in Tests 3/4)
+                human_ci = get_latest_ci_feedback_from_issue(issue_number)
+                if human_ci:
+                    ci_feedback = f"CI failed with the following error output:\n{human_ci}\n\nFix the code so `pytest -q` passes. Keep changes minimal."
+                else:
+                    failed_runs = []
+                    for r in (last_status.get("runs") or []):
+                        name = r.get("name")
+                        concl = r.get("conclusion")
+                        if concl and concl != "success":
+                            failed_runs.append(f"{name}={concl}")
 
-                ci_feedback = (
-                    "CI failed. Failed checks: " + (", ".join(failed_runs) if failed_runs else "unknown") +
-                    ". Fix the code so `pytest -q` passes. Keep changes minimal."
-                )
+                    ci_feedback = (
+                        "CI failed. Failed checks: " + (", ".join(failed_runs) if failed_runs else "unknown") +
+                        ". Fix the code so `pytest -q` passes. Keep changes minimal."
+                    )
 
                 # Refresh repo context from the BRANCH for edited files so retry sees latest state
                 for p in changed_paths:
