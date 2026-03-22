@@ -51,25 +51,37 @@ def evaluate(applicant: Dict[str, Any], policy: Optional[Dict[str, Any]] = None)
     if policy is None:
         policy = load_policy()
 
+    # Ensure rules are evaluated in priority order (ascending)
+    rules = list(policy.get("rules", []))
+    rules.sort(key=lambda r: r.get("priority", 999999))
+
     reason_ids: List[str] = []
     reasons: List[str] = []
+    matched_decisions: List[str] = []
 
-    for rule in policy.get("rules", []):
+    for rule in rules:
         rid = rule["id"]
-        decision = rule["decision"]
+        rdecision = rule["decision"]
         reason = rule.get("reason", "")
         conditions = rule.get("conditions", {})
 
         if _matches(conditions, applicant):
             reason_ids.append(rid)
             reasons.append(reason)
+            matched_decisions.append(rdecision)
 
-            # For this prototype: first match decides outcome.
-            # (Priority ordering makes this deterministic.)
-            return Decision(decision=decision, reason_ids=reason_ids, reasons=reasons)
+    if not reason_ids:
+        return Decision(
+            decision=policy.get("default_decision", "approve"),
+            reason_ids=[],
+            reasons=[]
+        )
 
-    return Decision(
-        decision=policy.get("default_decision", "approve"),
-        reason_ids=[],
-        reasons=[]
-    )
+    # Determine overall decision by severity: reject > refer > approve
+    overall = "approve"
+    if any(d == "reject" for d in matched_decisions):
+        overall = "reject"
+    elif any(d == "refer" for d in matched_decisions):
+        overall = "refer"
+
+    return Decision(decision=overall, reason_ids=reason_ids, reasons=reasons)
