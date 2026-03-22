@@ -65,13 +65,32 @@
     }
 
     function evaluate(applicant, policy) {
-      const rules = [...policy.rules].sort((a,b) => (a.priority ?? 999999) - (b.priority ?? 999999));
+      const rules = [...(policy.rules || [])].sort((a,b) => (a.priority ?? 999999) - (b.priority ?? 999999));
+      const reason_ids = [];
+      const reasons = [];
+      const matched_decisions = [];
+
       for (const rule of rules) {
         if (matches(rule.conditions || {}, applicant)) {
-          return { decision: rule.decision, reason_ids: [rule.id], reasons: [rule.reason] };
+          reason_ids.push(rule.id);
+          reasons.push(rule.reason);
+          matched_decisions.push(rule.decision);
         }
       }
-      return { decision: policy.default_decision || "approve", reason_ids: [], reasons: [] };
+
+      if (reason_ids.length === 0) {
+        return { decision: policy.default_decision || "approve", reason_ids: [], reasons: [] };
+      }
+
+      // Severity: reject > refer > approve
+      let overall = "approve";
+      if (matched_decisions.some(d => d === "reject")) {
+        overall = "reject";
+      } else if (matched_decisions.some(d => d === "refer")) {
+        overall = "refer";
+      }
+
+      return { decision: overall, reason_ids: reason_ids, reasons: reasons };
     }
 
     function badge(decision) {
