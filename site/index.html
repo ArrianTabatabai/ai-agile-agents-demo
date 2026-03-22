@@ -16,17 +16,60 @@
     .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono"; }
     .small { color: #555; font-size: 13px; }
     ul { margin-top: 8px; }
+    .input-group { display: flex; flex-wrap: wrap; gap: 12px; margin: 10px 0; }
+    .input-group label { display: flex; flex-direction: column; font-size: 13px; color: #555; }
+    .input-group input, .input-group select { margin-top: 4px; padding: 8px; border: 1px solid #ccc; border-radius: 6px; }
+    .tab-bar { display: flex; gap: 0; margin-bottom: 16px; border-bottom: 2px solid #ddd; }
+    .tab { padding: 8px 16px; cursor: pointer; border: none; background: none; font-size: 14px; color: #666; border-bottom: 2px solid transparent; margin-bottom: -2px; }
+    .tab.active { color: #1b7a3a; border-bottom-color: #1b7a3a; font-weight: bold; }
+    .tab-content { display: none; }
+    .tab-content.active { display: block; }
   </style>
 </head>
 <body>
   <div class="card">
     <h2>Loan Decisioning Preview</h2>
-    <p class="small">PO validation happens here: choose a golden case, click “Evaluate”, confirm decision & reasons.</p>
+    <p class="small">PO validation: choose a golden case or enter custom values, click "Evaluate", confirm decision &amp; reasons.</p>
 
-    <div class="row">
-      <label>Golden case:</label>
-      <select id="caseSelect"></select>
-      <button onclick="run()">Evaluate</button>
+    <!-- Tabs -->
+    <div class="tab-bar">
+      <button class="tab active" onclick="switchTab('golden')">Golden Cases</button>
+      <button class="tab" onclick="switchTab('custom')">Custom Input</button>
+    </div>
+
+    <!-- Golden Cases Tab -->
+    <div id="tab-golden" class="tab-content active">
+      <div class="row">
+        <label>Golden case:</label>
+        <select id="caseSelect"></select>
+        <button onclick="runGolden()">Evaluate</button>
+      </div>
+    </div>
+
+    <!-- Custom Input Tab -->
+    <div id="tab-custom" class="tab-content">
+      <div class="input-group">
+        <label>
+          Credit Score
+          <input type="number" id="inp_credit_score" value="500" min="0" max="850" />
+        </label>
+        <label>
+          DTI (e.g. 0.35)
+          <input type="number" id="inp_dti" value="0.50" step="0.01" min="0" max="1" />
+        </label>
+        <label>
+          Income
+          <input type="number" id="inp_income" value="20000" min="0" />
+        </label>
+        <label>
+          Defaults (past 24m)
+          <select id="inp_defaults">
+            <option value="true">Yes</option>
+            <option value="false">No</option>
+          </select>
+        </label>
+      </div>
+      <button onclick="runCustom()">Evaluate</button>
     </div>
 
     <h3>Applicant</h3>
@@ -46,6 +89,20 @@
     let policy = null;
     let cases = [];
 
+    /* ---- Tab switching ---- */
+    function switchTab(name) {
+      document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+      document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+      if (name === 'golden') {
+        document.querySelectorAll('.tab')[0].classList.add('active');
+        document.getElementById('tab-golden').classList.add('active');
+      } else {
+        document.querySelectorAll('.tab')[1].classList.add('active');
+        document.getElementById('tab-custom').classList.add('active');
+      }
+    }
+
+    /* ---- Matching logic ---- */
     function matches(conditions, applicant) {
       for (const [key, value] of Object.entries(conditions)) {
         if (key.endsWith("_lt")) {
@@ -64,23 +121,44 @@
       return true;
     }
 
+    /* ---- Multi-rule evaluate (matches Python rules.py behavior) ---- */
     function evaluate(applicant, policy) {
-      const rules = [...policy.rules].sort((a,b) => (a.priority ?? 999999) - (b.priority ?? 999999));
+      const rules = [...(policy.rules || [])].sort((a, b) => (a.priority ?? 999999) - (b.priority ?? 999999));
+      const reason_ids = [];
+      const reasons = [];
+      const matched_decisions = [];
+
       for (const rule of rules) {
         if (matches(rule.conditions || {}, applicant)) {
-          return { decision: rule.decision, reason_ids: [rule.id], reasons: [rule.reason] };
+          reason_ids.push(rule.id);
+          reasons.push(rule.reason);
+          matched_decisions.push(rule.decision);
         }
       }
-      return { decision: policy.default_decision || "approve", reason_ids: [], reasons: [] };
+
+      if (reason_ids.length === 0) {
+        return { decision: policy.default_decision || "approve", reason_ids: [], reasons: [] };
+      }
+
+      // Severity: reject > refer > approve
+      let overall = "approve";
+      if (matched_decisions.some(d => d === "reject")) {
+        overall = "reject";
+      } else if (matched_decisions.some(d => d === "refer")) {
+        overall = "refer";
+      }
+
+      return { decision: overall, reason_ids: reason_ids, reasons: reasons };
     }
 
+    /* ---- Rendering ---- */
     function badge(decision) {
       const cls = decision === "approve" ? "approve" : decision === "reject" ? "reject" : "refer";
       return `<span class="badge ${cls}">${decision.toUpperCase()}</span>`;
     }
 
     function renderApplicant(app) {
-      const parts = Object.entries(app).map(([k,v]) => `${k}: ${v}`);
+      const parts = Object.entries(app).map(([k, v]) => `${k}: ${v}`);
       document.getElementById("applicantView").innerText = parts.join(" | ");
     }
 
@@ -89,11 +167,34 @@
       if (out.reasons.length === 0) {
         document.getElementById("reasonsBlock").innerHTML = `<div class="small">No rule triggered.</div>`;
       } else {
-        const items = out.reason_ids.map((id, i) => `<li><span class="mono">${id}</span> — ${out.reasons[i]}</li>`).join("");
+        const items = out.reason_ids.map((id, i) =>
+          `<li><span class="mono">${id}</span> — ${out.reasons[i]}</li>`
+        ).join("");
         document.getElementById("reasonsBlock").innerHTML = `<ul>${items}</ul>`;
       }
     }
 
+    /* ---- Run from golden case ---- */
+    function runGolden() {
+      const idx = Number(document.getElementById("caseSelect").value);
+      const cs = cases[idx];
+      renderApplicant(cs.input);
+      renderDecision(evaluate(cs.input, policy));
+    }
+
+    /* ---- Run from custom input ---- */
+    function runCustom() {
+      const applicant = {
+        credit_score: Number(document.getElementById("inp_credit_score").value),
+        dti: Number(document.getElementById("inp_dti").value),
+        income: Number(document.getElementById("inp_income").value),
+        defaults_past_24m: document.getElementById("inp_defaults").value === "true"
+      };
+      renderApplicant(applicant);
+      renderDecision(evaluate(applicant, policy));
+    }
+
+    /* ---- Load data ---- */
     async function loadData() {
       const p = await fetch("data/policy.json").then(r => r.json());
       const c = await fetch("data/golden_cases.json").then(r => r.json());
@@ -114,13 +215,6 @@
       // default render first case
       renderApplicant(cases[0].input);
       renderDecision(evaluate(cases[0].input, policy));
-    }
-
-    function run() {
-      const idx = Number(document.getElementById("caseSelect").value);
-      const cs = cases[idx];
-      renderApplicant(cs.input);
-      renderDecision(evaluate(cs.input, policy));
     }
 
     loadData();
