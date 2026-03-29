@@ -54,6 +54,9 @@ def evaluate(applicant: Dict[str, Any], policy: Optional[Dict[str, Any]] = None)
     reason_ids: List[str] = []
     reasons: List[str] = []
 
+    has_reject = False
+    has_refer = False
+
     for rule in policy.get("rules", []):
         rid = rule["id"]
         decision = rule["decision"]
@@ -64,12 +67,23 @@ def evaluate(applicant: Dict[str, Any], policy: Optional[Dict[str, Any]] = None)
             reason_ids.append(rid)
             reasons.append(reason)
 
-            # For this prototype: first match decides outcome.
-            # (Priority ordering makes this deterministic.)
-            return Decision(decision=decision, reason_ids=reason_ids, reasons=reasons)
+            if decision == "reject":
+                has_reject = True
+            elif decision == "refer":
+                has_refer = True
 
-    return Decision(
-        decision=policy.get("default_decision", "approve"),
-        reason_ids=[],
-        reasons=[]
-    )
+    if not reason_ids:
+        return Decision(
+            decision=policy.get("default_decision", "approve"),
+            reason_ids=[],
+            reasons=[]
+        )
+
+    if has_reject:
+        overall = "reject"
+    elif has_refer:
+        overall = "refer"
+    else:
+        overall = policy.get("default_decision", "approve")
+
+    return Decision(decision=overall, reason_ids=reason_ids, reasons=reasons)
