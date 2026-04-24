@@ -48,11 +48,21 @@ def _matches(conditions: Dict[str, Any], applicant: Dict[str, Any]) -> bool:
 
 
 def evaluate(applicant: Dict[str, Any], policy: Optional[Dict[str, Any]] = None) -> Decision:
+    """
+    Evaluate an applicant against the policy.
+
+    This version collects all matching rules (in priority order) and then computes
+    an overall decision with severity override semantics:
+      - reject overrides refer and approve
+      - refer overrides approve
+      - approve if no higher severity triggered
+    """
     if policy is None:
         policy = load_policy()
 
     reason_ids: List[str] = []
     reasons: List[str] = []
+    matched_decisions: List[str] = []
 
     for rule in policy.get("rules", []):
         rid = rule["id"]
@@ -63,13 +73,20 @@ def evaluate(applicant: Dict[str, Any], policy: Optional[Dict[str, Any]] = None)
         if _matches(conditions, applicant):
             reason_ids.append(rid)
             reasons.append(reason)
+            matched_decisions.append(decision)
 
-            # For this prototype: first match decides outcome.
-            # (Priority ordering makes this deterministic.)
-            return Decision(decision=decision, reason_ids=reason_ids, reasons=reasons)
+    if len(reason_ids) == 0:
+        return Decision(
+            decision=policy.get("default_decision", "approve"),
+            reason_ids=[],
+            reasons=[]
+        )
 
-    return Decision(
-        decision=policy.get("default_decision", "approve"),
-        reason_ids=[],
-        reasons=[]
-    )
+    # Severity: reject > refer > approve
+    overall = "approve"
+    if any(d == "reject" for d in matched_decisions):
+        overall = "reject"
+    elif any(d == "refer" for d in matched_decisions):
+        overall = "refer"
+
+    return Decision(decision=overall, reason_ids=reason_ids, reasons=reasons)
