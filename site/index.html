@@ -24,6 +24,10 @@
     .tab.active { color: #1b7a3a; border-bottom-color: #1b7a3a; font-weight: bold; }
     .tab-content { display: none; }
     .tab-content.active { display: block; }
+    .summary { padding: 10px; border-radius: 8px; margin-top: 8px; font-weight: bold; display: inline-block; }
+    .summary.low { background: #e7f7ed; color: #1b7a3a; }
+    .summary.medium { background: #fff6db; color: #8a5b00; }
+    .summary.high { background: #fdeaea; color: #b42318; }
   </style>
 </head>
 <body>
@@ -78,6 +82,9 @@
     <h3>Decision</h3>
     <div id="decisionLine"></div>
     <div id="reasonsBlock"></div>
+
+    <h3>Affordability Summary</h3>
+    <div id="affordabilitySummary" class="small"></div>
 
     <hr />
     <div class="small">
@@ -157,6 +164,16 @@
       return `<span class="badge ${cls}">${decision.toUpperCase()}</span>`;
     }
 
+    function affordabilityText(decision) {
+      if (decision === "reject") {
+        return { text: "High risk — Not affordable", cls: "high" };
+      } else if (decision === "refer") {
+        return { text: "Marginal affordability — Manual review recommended", cls: "medium" };
+      } else {
+        return { text: "Low risk — Affordable", cls: "low" };
+      }
+    }
+
     function renderApplicant(app) {
       const parts = Object.entries(app).map(([k, v]) => `${k}: ${v}`);
       document.getElementById("applicantView").innerText = parts.join(" | ");
@@ -172,6 +189,9 @@
         ).join("");
         document.getElementById("reasonsBlock").innerHTML = `<ul>${items}</ul>`;
       }
+
+      const summary = affordabilityText(out.decision);
+      document.getElementById("affordabilitySummary").innerHTML = `<div class="summary ${summary.cls}">${summary.text}</div>`;
     }
 
     /* ---- Run from golden case ---- */
