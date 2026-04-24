@@ -1,0 +1,432 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Loan Decisioning Preview</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 40px; background: #f6f7f8; }
+    .card { max-width: 920px; padding: 20px; border: 1px solid #ddd; border-radius: 12px; background: white; box-shadow: 0 6px 20px rgba(0,0,0,0.06); }
+    select, input { padding: 8px; margin: 6px 8px 6px 0; }
+    button { padding: 8px 12px; cursor: pointer; }
+    .row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+    .badge { display: inline-block; padding: 6px 10px; border-radius: 999px; font-weight: bold; }
+    .approve { background: #e7f7ed; color: #1b7a3a; }
+    .reject { background: #fdeaea; color: #b42318; }
+    .refer { background: #fff6db; color: #8a5b00; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono"; }
+    .small { color: #555; font-size: 13px; }
+    ul { margin-top: 8px; }
+    .input-group { display: flex; flex-wrap: wrap; gap: 12px; margin: 10px 0; }
+    .input-group label { display: flex; flex-direction: column; font-size: 13px; color: #555; }
+    .input-group input, .input-group select { margin-top: 4px; padding: 8px; border: 1px solid #ccc; border-radius: 6px; }
+    .tab-bar { display: flex; gap: 0; margin-bottom: 16px; border-bottom: 2px solid #ddd; }
+    .tab { padding: 8px 16px; cursor: pointer; border: none; background: none; font-size: 14px; color: #666; border-bottom: 2px solid transparent; margin-bottom: -2px; }
+    .tab.active { color: #1b7a3a; border-bottom-color: #1b7a3a; font-weight: bold; }
+    .tab-content { display: none; }
+    .tab-content.active { display: block; }
+
+    /* New dashboard layout */
+    .panels { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 12px; }
+    .panel { padding: 12px; border-radius: 8px; border: 1px solid #eee; background: #fafafa; min-height: 80px; }
+    .panel h4 { margin: 0 0 8px 0; }
+    .decision-summary { display: flex; align-items: center; gap: 12px; }
+    .rule-list { list-style: none; padding-left: 0; margin: 0; }
+    .rule-item { padding: 8px; border-bottom: 1px dashed #eee; display: flex; justify-content: space-between; gap: 12px; align-items: center; }
+    .rule-meta { color: #666; font-size: 12px; }
+    .risk-low { background: #e7f7ed; color: #1b7a3a; padding: 6px 10px; border-radius: 8px; font-weight: 600; }
+    .risk-medium { background: #fff8e6; color: #8a5b00; padding: 6px 10px; border-radius: 8px; font-weight: 600; }
+    .risk-high { background: #fff0f0; color: #b42318; padding: 6px 10px; border-radius: 8px; font-weight: 600; }
+    .compare { margin-top: 12px; padding: 12px; border-radius: 8px; border: 1px solid #eee; background: #ffffff; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h2>Loan Decisioning Preview</h2>
+    <p class="small">PO validation: choose a golden case or enter custom values, click "Evaluate", confirm decision &amp; reasons.</p>
+
+    <!-- Tabs -->
+    <div class="tab-bar">
+      <button class="tab active" onclick="switchTab('golden')">Golden Cases</button>
+      <button class="tab" onclick="switchTab('custom')">Custom Input</button>
+    </div>
+
+    <!-- Golden Cases Tab -->
+    <div id="tab-golden" class="tab-content active">
+      <div class="row">
+        <label>Golden case:</label>
+        <select id="caseSelect"></select>
+        <label>Compare to:</label>
+        <select id="compareSelect"></select>
+        <button onclick="runGolden()">Evaluate</button>
+      </div>
+    </div>
+
+    <!-- Custom Input Tab -->
+    <div id="tab-custom" class="tab-content">
+      <div class="input-group">
+        <label>
+          Credit Score
+          <input type="number" id="inp_credit_score" value="500" min="0" max="850" />
+        </label>
+        <label>
+          DTI (e.g. 0.35)
+          <input type="number" id="inp_dti" value="0.50" step="0.01" min="0" max="1" />
+        </label>
+        <label>
+          Income
+          <input type="number" id="inp_income" value="20000" min="0" />
+        </label>
+        <label>
+          Defaults (past 24m)
+          <select id="inp_defaults">
+            <option value="true">Yes</option>
+            <option value="false" selected>No</option>
+          </select>
+        </label>
+        <label style="align-items: flex-end; display:flex; flex-direction: column;">
+          Compare to:
+          <select id="compareSelectCustom"></select>
+        </label>
+      </div>
+      <button onclick="runCustom()">Evaluate</button>
+    </div>
+
+    <div class="panels" style="margin-top: 16px;">
+      <div>
+        <div class="panel" id="decisionPanel">
+          <h4>Decision Summary</h4>
+          <div id="decisionSummary" class="decision-summary small"></div>
+          <div id="decisionExplanation" class="small" style="margin-top:8px;"></div>
+        </div>
+
+        <div class="panel" id="rulesPanel" style="margin-top:12px;">
+          <h4>Triggered Rules</h4>
+          <div id="rulesContent" class="small"></div>
+        </div>
+      </div>
+
+      <div>
+        <div class="panel" id="applicantPanel">
+          <h4>Applicant Details</h4>
+          <div id="applicantDetails" class="small mono"></div>
+        </div>
+
+        <div class="panel" id="riskPanel" style="margin-top:12px;">
+          <h4>Risk & Recommendation</h4>
+          <div id="riskContent" class="small"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="compare" id="comparePanel" style="display:none;">
+      <strong>Comparison</strong>
+      <div id="compareContent" class="small" style="margin-top:8px;"></div>
+    </div>
+
+    <hr />
+    <div class="small">
+      Policy version: <span id="policyVersion" class="mono"></span>
+    </div>
+  </div>
+
+  <script>
+    let policy = null;
+    let cases = [];
+
+    /* ---- Tab switching ---- */
+    function switchTab(name) {
+      document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+      document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+      if (name === 'golden') {
+        document.querySelectorAll('.tab')[0].classList.add('active');
+        document.getElementById('tab-golden').classList.add('active');
+      } else {
+        document.querySelectorAll('.tab')[1].classList.add('active');
+        document.getElementById('tab-custom').classList.add('active');
+      }
+    }
+
+    /* ---- Matching logic ---- */
+    function matches(conditions, applicant) {
+      for (const [key, value] of Object.entries(conditions)) {
+        if (key.endsWith("_lt")) {
+          const field = key.slice(0, -3);
+          if (!(field in applicant) || applicant[field] === null || Number(applicant[field]) >= Number(value)) return false;
+        } else if (key.endsWith("_gt")) {
+          const field = key.slice(0, -3);
+          if (!(field in applicant) || applicant[field] === null || Number(applicant[field]) <= Number(value)) return false;
+        } else if (key.endsWith("_eq")) {
+          const field = key.slice(0, -3);
+          if (!(field in applicant) || applicant[field] !== value) return false;
+        } else {
+          if (!(key in applicant) || applicant[key] !== value) return false;
+        }
+      }
+      return true;
+    }
+
+    /* ---- Multi-rule evaluate (collect all matches) ---- */
+    function evaluate(applicant, policy) {
+      const rules = [...(policy.rules || [])].sort((a, b) => (a.priority ?? 999999) - (b.priority ?? 999999));
+      const reason_ids = [];
+      const reasons = [];
+      const matched_decisions = [];
+      const matched_rules = [];
+
+      for (const rule of rules) {
+        if (matches(rule.conditions || {}, applicant)) {
+          reason_ids.push(rule.id);
+          reasons.push(rule.reason || "");
+          matched_decisions.push(rule.decision);
+          matched_rules.push({
+            id: rule.id,
+            reason: rule.reason || "",
+            decision: rule.decision,
+            priority: rule.priority ?? 999999
+          });
+        }
+      }
+
+      if (reason_ids.length === 0) {
+        return { decision: policy.default_decision || "approve", reason_ids: [], reasons: [], matched_rules: [] };
+      }
+
+      // Severity: reject > refer > approve
+      let overall = "approve";
+      if (matched_decisions.some(d => d === "reject")) {
+        overall = "reject";
+      } else if (matched_decisions.some(d => d === "refer")) {
+        overall = "refer";
+      }
+
+      return { decision: overall, reason_ids: reason_ids, reasons: reasons, matched_rules: matched_rules };
+    }
+
+    /* ---- Scoring and bands ---- */
+    function computeScore(app) {
+      // credit_score contributes up to 50
+      const credit = (app.credit_score !== undefined && app.credit_score !== null && !isNaN(app.credit_score))
+        ? Math.max(0, Math.min(50, (app.credit_score / 850) * 50))
+        : 25; // neutral if missing
+
+      // dti contributes up to 30 (higher DTI reduces score)
+      const dti = (app.dti !== undefined && app.dti !== null && !isNaN(app.dti))
+        ? Math.max(0, Math.min(30, (1 - Math.min(app.dti, 1)) * 30))
+        : 15;
+
+      // income contributes up to 20 (cap at 100k)
+      const income = (app.income !== undefined && app.income !== null && !isNaN(app.income))
+        ? Math.max(0, Math.min(20, (Math.min(app.income, 100000) / 100000) * 20))
+        : 10;
+
+      const defaultsPenalty = app.defaults_past_24m ? 40 : 0;
+
+      let score = Math.round(credit + dti + income - defaultsPenalty);
+      if (score < 0) score = 0;
+      if (score > 100) score = 100;
+      return score;
+    }
+
+    function riskBand(score) {
+      if (score >= 80) return "Low";
+      if (score >= 50) return "Medium";
+      return "High";
+    }
+
+    function recommendationText(decision, band) {
+      if (decision === "approve" && band === "Low") return "Recommendation: Proceed to funding.";
+      if (decision === "approve" && band === "Medium") return "Recommendation: Proceed with caution; consider additional verification.";
+      if (decision === "refer" || band === "Medium") return "Recommendation: Manual review recommended.";
+      if (decision === "reject" || band === "High") return "Recommendation: Decline or escalate.";
+      return "Recommendation: Use reviewer judgement.";
+    }
+
+    /* ---- Rendering ---- */
+    function badge(decision) {
+      const cls = decision === "approve" ? "approve" : decision === "reject" ? "reject" : "refer";
+      return `<span class="badge ${cls}">${decision.toUpperCase()}</span>`;
+    }
+
+    function renderApplicant(app) {
+      const lines = [
+        `Credit score: ${app.credit_score !== undefined ? app.credit_score : "—"}`,
+        `DTI: ${app.dti !== undefined ? app.dti : "—"}`,
+        `Income: ${app.income !== undefined ? app.income : "—"}`,
+        `Recent defaults: ${app.defaults_past_24m === undefined ? "—" : (app.defaults_past_24m ? "Yes" : "No")}`
+      ];
+      document.getElementById("applicantDetails").innerHTML = lines.join("<br>");
+    }
+
+    function renderDecision(out, applicant) {
+      const score = computeScore(applicant);
+      const band = riskBand(score);
+
+      document.getElementById("decisionSummary").innerHTML = `
+        ${badge(out.decision)}
+        <div>
+          <div style="font-weight:600;">${out.decision.toUpperCase()}</div>
+          <div class="small">${out.reason_ids.length > 0 ? `${out.reason_ids.length} rule(s) triggered` : 'No rules triggered'}</div>
+        </div>
+      `;
+
+      const explanation = out.reason_ids.length === 0
+        ? `No policy rules were triggered. Default decision: ${policy.default_decision || 'approve'}.`
+        : `Outcome based on triggered rules: ${out.reason_ids.join(", ")}. ${out.reasons.join(" / ")}`;
+
+      document.getElementById("decisionExplanation").innerText = explanation;
+
+      // Rules panel
+      renderRules(out.matched_rules || []);
+
+      // Risk panel
+      const riskEl = document.getElementById("riskContent");
+      let riskHtml = `<div style="display:flex; align-items:center; gap:12px;">`;
+      const riskClass = band === "Low" ? "risk-low" : band === "Medium" ? "risk-medium" : "risk-high";
+      riskHtml += `<div class="${riskClass}">${band} Risk</div>`;
+      riskHtml += `<div>Score: <span class="mono">${score}</span>/100</div>`;
+      riskHtml += `</div>`;
+      riskHtml += `<div style="margin-top:8px;">${recommendationText(out.decision, band)}</div>`;
+      riskEl.innerHTML = riskHtml;
+
+      // Show decision/score at top of rules panel small summary as well
+    }
+
+    function renderRules(matched_rules) {
+      const container = document.getElementById("rulesContent");
+      if (!matched_rules || matched_rules.length === 0) {
+        container.innerHTML = `<div class="small">No rule triggered.</div>`;
+        return;
+      }
+      // Ensure priority order (ascending)
+      matched_rules.sort((a, b) => (a.priority ?? 999999) - (b.priority ?? 999999));
+      const items = matched_rules.map(r =>
+        `<div class="rule-item">
+           <div>
+             <div><span class="mono">${r.id}</span> — ${r.reason || 'No reason provided'}</div>
+             <div class="rule-meta">priority: ${r.priority} • impact: ${r.decision}</div>
+           </div>
+           <div>${badge(r.decision)}</div>
+         </div>`
+      ).join("");
+      container.innerHTML = `<div>${items}</div>`;
+    }
+
+    /* ---- Comparison ---- */
+    function renderComparison(leftApp, leftOut, rightApp, rightOut) {
+      if (!rightApp) {
+        document.getElementById("comparePanel").style.display = "none";
+        return;
+      }
+      document.getElementById("comparePanel").style.display = "block";
+      const leftScore = computeScore(leftApp);
+      const rightScore = computeScore(rightApp);
+      const leftDecision = leftOut.decision;
+      const rightDecision = rightOut.decision;
+      let sentence = "";
+      if (leftScore === rightScore) {
+        sentence = "Both applicants have similar risk scores.";
+      } else if (Math.abs(leftScore - rightScore) < 6) {
+        sentence = `Scores are close. ${leftScore > rightScore ? 'Selected applicant' : 'Comparison applicant'} slightly stronger.`;
+      } else {
+        sentence = `${leftScore > rightScore ? 'Selected applicant' : 'Comparison applicant'} appears stronger with a higher score (${Math.max(leftScore, rightScore)} vs ${Math.min(leftScore, rightScore)}).`;
+      }
+
+      // Add note about decisions if different
+      if (leftDecision !== rightDecision) {
+        sentence += ` Decisions differ: selected is ${leftDecision}, comparison is ${rightDecision}.`;
+      }
+
+      document.getElementById("compareContent").innerHTML = `
+        <div style="display:flex; gap:16px; flex-wrap:wrap;">
+          <div><strong>Selected</strong>: ${badge(leftDecision)} — Score: <span class="mono">${leftScore}</span></div>
+          <div><strong>Comparison</strong>: ${badge(rightDecision)} — Score: <span class="mono">${rightScore}</span></div>
+        </div>
+        <div style="margin-top:8px;">${sentence}</div>
+      `;
+    }
+
+    /* ---- Run from golden case ---- */
+    function runGolden() {
+      const idx = Number(document.getElementById("caseSelect").value);
+      const cs = cases[idx];
+      const selectedApp = cs.input;
+      renderApplicant(selectedApp);
+      const out = evaluate(selectedApp, policy);
+      renderDecision(out, selectedApp);
+
+      // comparison
+      const compIdx = Number(document.getElementById("compareSelect").value);
+      const comp = isNaN(compIdx) ? null : cases[compIdx];
+      const compApp = comp ? comp.input : null;
+      const compOut = compApp ? evaluate(compApp, policy) : null;
+      renderComparison(selectedApp, out, compApp, compOut);
+    }
+
+    /* ---- Run from custom input ---- */
+    function runCustom() {
+      const applicant = {
+        credit_score: maybeNumber(document.getElementById("inp_credit_score").value),
+        dti: maybeNumber(document.getElementById("inp_dti").value),
+        income: maybeNumber(document.getElementById("inp_income").value),
+        defaults_past_24m: document.getElementById("inp_defaults").value === "true"
+      };
+      renderApplicant(applicant);
+      const out = evaluate(applicant, policy);
+      renderDecision(out, applicant);
+
+      // comparison
+      const compSel = document.getElementById("compareSelectCustom");
+      const compIdx = Number(compSel.value);
+      const comp = isNaN(compIdx) ? null : cases[compIdx];
+      const compApp = comp ? comp.input : null;
+      const compOut = compApp ? evaluate(compApp, policy) : null;
+      renderComparison(applicant, out, compApp, compOut);
+    }
+
+    function maybeNumber(v) {
+      if (v === null || v === undefined || v === "") return null;
+      const n = Number(v);
+      return isNaN(n) ? null : n;
+    }
+
+    /* ---- Load data ---- */
+    async function loadData() {
+      const p = await fetch("data/policy.json").then(r => r.json());
+      const c = await fetch("data/golden_cases.json").then(r => r.json());
+      policy = p;
+      cases = c;
+
+      document.getElementById("policyVersion").innerText = policy.version || "unknown";
+
+      const select = document.getElementById("caseSelect");
+      const compare = document.getElementById("compareSelect");
+      const compareCustom = document.getElementById("compareSelectCustom");
+      select.innerHTML = "";
+      compare.innerHTML = "";
+      compareCustom.innerHTML = "<option value=\"\">(none)</option>";
+
+      cases.forEach((cs, idx) => {
+        const opt = document.createElement("option");
+        opt.value = idx;
+        opt.textContent = cs.name;
+        select.appendChild(opt);
+
+        const opt2 = opt.cloneNode(true);
+        compare.appendChild(opt2);
+
+        const opt3 = opt.cloneNode(true);
+        compareCustom.appendChild(opt3);
+      });
+
+      // default render first case
+      renderApplicant(cases[0].input);
+      const out = evaluate(cases[0].input, policy);
+      renderDecision(out, cases[0].input);
+      // no comparison by default
+      document.getElementById("comparePanel").style.display = "none";
+    }
+
+    loadData();
+  </script>
+</body>
+</html>
