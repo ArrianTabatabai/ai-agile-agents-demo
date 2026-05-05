@@ -24,6 +24,18 @@
     .tab.active { color: #1b7a3a; border-bottom-color: #1b7a3a; font-weight: bold; }
     .tab-content { display: none; }
     .tab-content.active { display: block; }
+
+    /* Guidance panel styling */
+    .guidance-panel {
+      margin-top: 12px;
+      padding: 12px;
+      border-radius: 8px;
+      background: #fbfbfd;
+      border: 1px solid #e6e7ea;
+    }
+    .guidance-title { font-weight: bold; margin-bottom: 6px; }
+    .guidance-recommend { margin-top: 8px; font-weight: 600; }
+    .guidance-expl { color: #333; }
   </style>
 </head>
 <body>
@@ -78,6 +90,9 @@
     <h3>Decision</h3>
     <div id="decisionLine"></div>
     <div id="reasonsBlock"></div>
+
+    <h3>Reviewer guidance</h3>
+    <div id="guidancePanel" class="guidance-panel"></div>
 
     <hr />
     <div class="small">
@@ -162,8 +177,23 @@
       document.getElementById("applicantView").innerText = parts.join(" | ");
     }
 
+    function generateRecommendation(decision) {
+      if (decision === "approve") return "Proceed with approval checks.";
+      if (decision === "refer") return "Send for manual review.";
+      if (decision === "reject") return "Decline or escalate according to policy.";
+      return "";
+    }
+
+    function generateExplanation(decision) {
+      if (decision === "approve") return "Policy evaluation indicates the application meets automated approval criteria.";
+      if (decision === "refer") return "Policy evaluation indicates uncertainty or conditions that require human review.";
+      if (decision === "reject") return "Policy evaluation indicates the application does not meet eligibility rules.";
+      return "";
+    }
+
     function renderDecision(out) {
       document.getElementById("decisionLine").innerHTML = badge(out.decision);
+
       if (out.reasons.length === 0) {
         document.getElementById("reasonsBlock").innerHTML = `<div class="small">No rule triggered.</div>`;
       } else {
@@ -172,6 +202,27 @@
         ).join("");
         document.getElementById("reasonsBlock").innerHTML = `<ul>${items}</ul>`;
       }
+
+      // Render reviewer guidance panel
+      const rec = generateRecommendation(out.decision);
+      const expl = generateExplanation(out.decision);
+
+      let reasonsHtml = "";
+      if (out.reason_ids && out.reason_ids.length > 0) {
+        reasonsHtml = `<div class="small"><strong>Triggered reasons:</strong><ul>` +
+          out.reason_ids.map((id, i) => `<li><span class="mono">${id}</span> — ${out.reasons[i]}</li>`).join("") +
+          `</ul></div>`;
+      } else {
+        reasonsHtml = `<div class="small">No rule triggered.</div>`;
+      }
+
+      const panelHtml =
+        `<div class="guidance-title">Decision: ${badge(out.decision)}</div>` +
+        `<div class="guidance-expl">${expl}</div>` +
+        `${reasonsHtml}` +
+        `<div class="guidance-recommend">Recommendation: ${rec}</div>`;
+
+      document.getElementById("guidancePanel").innerHTML = panelHtml;
     }
 
     /* ---- Run from golden case ---- */
