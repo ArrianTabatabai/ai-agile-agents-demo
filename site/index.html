@@ -24,6 +24,12 @@
     .tab.active { color: #1b7a3a; border-bottom-color: #1b7a3a; font-weight: bold; }
     .tab-content { display: none; }
     .tab-content.active { display: block; }
+
+    /* Reviewer guidance panel */
+    .guidance { margin-top: 12px; padding: 12px; border-radius: 8px; background: #fbfdff; border: 1px solid #e6eef6; }
+    .guidance h4 { margin: 0 0 8px 0; font-size: 15px; }
+    .guidance .explain { color: #333; margin-bottom: 8px; }
+    .guidance .recommend { font-weight: bold; margin-top: 8px; }
   </style>
 </head>
 <body>
@@ -78,6 +84,14 @@
     <h3>Decision</h3>
     <div id="decisionLine"></div>
     <div id="reasonsBlock"></div>
+
+    <!-- Reviewer Guidance Panel -->
+    <div id="guidancePanel" class="guidance" style="display:none;">
+      <h4>Reviewer guidance</h4>
+      <div id="guidanceExplain" class="explain"></div>
+      <div id="guidanceReasons" class="small"></div>
+      <div id="guidanceRecommend" class="recommend"></div>
+    </div>
 
     <hr />
     <div class="small">
@@ -162,8 +176,24 @@
       document.getElementById("applicantView").innerText = parts.join(" | ");
     }
 
+    function recommendationFor(decision) {
+      if (decision === "approve") return "Proceed with approval checks.";
+      if (decision === "refer") return "Send for manual review.";
+      if (decision === "reject") return "Decline or escalate according to policy.";
+      return "";
+    }
+
+    function shortExplanation(decision) {
+      if (decision === "approve") return "Applicant meets policy criteria.";
+      if (decision === "refer") return "Application requires manual review due to flagged conditions.";
+      if (decision === "reject") return "Application failed to meet policy requirements.";
+      return "";
+    }
+
     function renderDecision(out) {
       document.getElementById("decisionLine").innerHTML = badge(out.decision);
+
+      // Reasons block (keeps previous behavior)
       if (out.reasons.length === 0) {
         document.getElementById("reasonsBlock").innerHTML = `<div class="small">No rule triggered.</div>`;
       } else {
@@ -172,6 +202,29 @@
         ).join("");
         document.getElementById("reasonsBlock").innerHTML = `<ul>${items}</ul>`;
       }
+
+      // Reviewer guidance panel (visible after evaluation)
+      const panel = document.getElementById("guidancePanel");
+      const explain = document.getElementById("guidanceExplain");
+      const greasons = document.getElementById("guidanceReasons");
+      const grecommend = document.getElementById("guidanceRecommend");
+
+      // Explanation
+      explain.innerText = shortExplanation(out.decision);
+
+      // Triggered reasons (if any)
+      if (out.reason_ids && out.reason_ids.length > 0) {
+        const list = out.reason_ids.map((id, i) => `<div><span class="mono">${id}</span> — ${out.reasons[i]}</div>`).join("");
+        greasons.innerHTML = `<div><strong>Triggered reasons:</strong></div>${list}`;
+      } else {
+        greasons.innerHTML = `<div class="small">No triggered reasons.</div>`;
+      }
+
+      // Recommendation mapping
+      grecommend.innerText = recommendationFor(out.decision);
+
+      // Show panel
+      panel.style.display = "block";
     }
 
     /* ---- Run from golden case ---- */
