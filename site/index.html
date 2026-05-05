@@ -24,6 +24,12 @@
     .tab.active { color: #1b7a3a; border-bottom-color: #1b7a3a; font-weight: bold; }
     .tab-content { display: none; }
     .tab-content.active { display: block; }
+
+    /* Reviewer guidance styles */
+    .guidance { margin-top: 14px; border: 1px solid #eef2f5; background: #fcfeff; padding: 12px; border-radius: 8px; }
+    .guidance h4 { margin: 4px 0 8px 0; }
+    .guidance .explain { color: #333; margin-bottom: 8px; }
+    .guidance .rec { font-weight: bold; margin-top: 8px; }
   </style>
 </head>
 <body>
@@ -78,6 +84,12 @@
     <h3>Decision</h3>
     <div id="decisionLine"></div>
     <div id="reasonsBlock"></div>
+
+    <!-- Reviewer guidance panel -->
+    <h3>Reviewer Guidance</h3>
+    <div id="reviewerPanel" class="guidance">
+      <div class="small">No evaluation yet. Run an evaluation to see reviewer guidance.</div>
+    </div>
 
     <hr />
     <div class="small">
@@ -172,6 +184,48 @@
         ).join("");
         document.getElementById("reasonsBlock").innerHTML = `<ul>${items}</ul>`;
       }
+
+      // Also render reviewer guidance panel
+      renderReviewer(out);
+    }
+
+    function renderReviewer(out) {
+      const panel = document.getElementById("reviewerPanel");
+      const decision = out.decision || "approve";
+
+      // Plain-English explanation
+      let explanation = "Applicant meets policy requirements.";
+      if (decision === "reject") {
+        explanation = "Applicant does not meet policy requirements based on the triggered rules.";
+      } else if (decision === "refer") {
+        explanation = "Applicant requires manual review due to potential concerns flagged by policy.";
+      }
+
+      // Recommendation mapping (must match exact required strings)
+      const recMap = {
+        "approve": "Proceed with approval checks.",
+        "refer": "Send for manual review.",
+        "reject": "Decline or escalate according to policy."
+      };
+      const recommendation = recMap[decision] || "Proceed with approval checks.";
+
+      // Triggered reasons display
+      let reasonsHtml = "";
+      if (out.reason_ids && out.reason_ids.length > 0) {
+        const items = out.reason_ids.map((id, i) =>
+          `<li><span class="mono">${id}</span> — ${out.reasons[i]}</li>`
+        ).join("");
+        reasonsHtml = `<div><strong>Triggered reasons:</strong><ul>${items}</ul></div>`;
+      } else {
+        reasonsHtml = `<div class="small">No rule triggered.</div>`;
+      }
+
+      panel.innerHTML = `
+        <h4>${badge(decision)} Reviewer guidance</h4>
+        <div class="explain">${explanation}</div>
+        ${reasonsHtml}
+        <div class="rec">Recommendation: ${recommendation}</div>
+      `;
     }
 
     /* ---- Run from golden case ---- */
