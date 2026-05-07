@@ -1,0 +1,605 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Loan Decisioning Preview</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 40px; background: #f6f7f8; }
+    .card { max-width: 1100px; padding: 20px; border: 1px solid #ddd; border-radius: 12px; background: white; box-shadow: 0 6px 20px rgba(0,0,0,0.06); }
+    select, input { padding: 8px; margin: 6px 8px 6px 0; }
+    button { padding: 8px 12px; cursor: pointer; }
+    .row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+    .badge { display: inline-block; padding: 6px 10px; border-radius: 999px; font-weight: bold; }
+    .approve { background: #e7f7ed; color: #1b7a3a; }
+    .reject { background: #fdeaea; color: #b42318; }
+    .refer { background: #fff6db; color: #8a5b00; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono"; }
+    .small { color: #555; font-size: 13px; }
+    ul { margin-top: 8px; padding-left: 18px; }
+    .input-group { display: flex; flex-wrap: wrap; gap: 12px; margin: 10px 0; }
+    .input-group label { display: flex; flex-direction: column; font-size: 13px; color: #555; }
+    .input-group input, .input-group select { margin-top: 4px; padding: 8px; border: 1px solid #ccc; border-radius: 6px; }
+    .tab-bar { display: flex; gap: 0; margin-bottom: 16px; border-bottom: 2px solid #ddd; }
+    .tab { padding: 8px 16px; cursor: pointer; border: none; background: none; font-size: 14px; color: #666; border-bottom: 2px solid transparent; margin-bottom: -2px; }
+    .tab.active { color: #1b7a3a; border-bottom-color: #1b7a3a; font-weight: bold; }
+    .tab-content { display: none; }
+    .tab-content.active { display: block; }
+
+    /* dashboard layout */
+    .grid { display: grid; grid-template-columns: 1fr 420px; gap: 18px; align-items: start; }
+    .panel { padding: 12px; border-radius: 10px; background: #fbfcfd; border: 1px solid #eee; }
+    .panel h4 { margin: 0 0 8px 0; }
+    .muted { color: #666; font-size: 13px; }
+
+    /* risk bands */
+    .risk-low { background: #e7f9ee; color: #0b6b3a; padding: 6px 8px; border-radius: 8px; font-weight: bold; display:inline-block;}
+    .risk-med { background: #fff7e6; color: #8a5b00; padding: 6px 8px; border-radius: 8px; font-weight: bold; display:inline-block;}
+    .risk-high { background: #fff0f0; color: #b42318; padding: 6px 8px; border-radius: 8px; font-weight: bold; display:inline-block;}
+
+    .bar { height: 12px; background: #e6eef6; border-radius: 6px; overflow: hidden; }
+    .bar-fill { height: 100%; background: #1b7a3a; border-radius: 6px 0 0 6px; }
+
+    .split { display:flex; gap:12px; }
+    .col { flex:1; }
+
+    .small-muted { font-size:12px; color:#777; }
+    .note { white-space:pre-wrap; background:#fff; padding:12px; border-radius:8px; border:1px dashed #eee; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h2>Loan Decisioning Workspace</h2>
+    <p class="small">Internal underwriting dashboard — review applicants, run what-if scenarios, compare cases, and generate a short underwriting note.</p>
+
+    <!-- Tabs -->
+    <div class="tab-bar" style="margin-top:12px;">
+      <button class="tab active" onclick="switchTab('golden')">Golden Cases</button>
+      <button class="tab" onclick="switchTab('custom')">Custom Input</button>
+    </div>
+
+    <div class="grid" style="margin-top:12px;">
+      <div>
+        <div class="panel">
+          <!-- Golden Cases Tab -->
+          <div id="tab-golden" class="tab-content active">
+            <div class="row">
+              <label style="min-width:100px;">Select case:</label>
+              <select id="caseSelect" onchange="onCaseChange()"></select>
+              <button onclick="runGolden()">Evaluate</button>
+              <label style="margin-left:auto;">
+                Compare with:
+                <select id="compareSelect" onchange="renderComparison()"></select>
+              </label>
+            </div>
+          </div>
+
+          <!-- Custom Input Tab -->
+          <div id="tab-custom" class="tab-content">
+            <div class="input-group">
+              <label>
+                Credit Score
+                <input type="number" id="inp_credit_score" value="500" min="0" max="850" />
+              </label>
+              <label>
+                DTI (e.g. 0.35)
+                <input type="number" id="inp_dti" value="0.50" step="0.01" min="0" max="1" />
+              </label>
+              <label>
+                Income
+                <input type="number" id="inp_income" value="20000" min="0" />
+              </label>
+              <label>
+                Defaults (past 24m)
+                <select id="inp_defaults">
+                  <option value="true">Yes</option>
+                  <option value="false" selected>No</option>
+                </select>
+              </label>
+            </div>
+            <button onclick="runCustom()">Evaluate</button>
+          </div>
+
+          <hr />
+
+          <h4>Applicant</h4>
+          <div id="applicantView" class="small mono"></div>
+
+          <h4 style="margin-top:12px;">Decision</h4>
+          <div id="decisionLine"></div>
+          <div id="reasonsBlock" class="small" style="margin-top:8px;"></div>
+
+          <div style="margin-top:12px;">
+            <button onclick="openWhatIf()">Open What-if Editor</button>
+            <button onclick="generateNote()">Generate Underwriting Note</button>
+          </div>
+
+          <div id="whatIfPanel" style="margin-top:12px; display:none;">
+            <div class="input-group">
+              <label>
+                Credit Score
+                <input type="number" id="wf_credit_score" min="0" max="850" />
+              </label>
+              <label>
+                DTI
+                <input type="number" id="wf_dti" step="0.01" min="0" max="1" />
+              </label>
+              <label>
+                Income
+                <input type="number" id="wf_income" min="0" />
+              </label>
+              <label>
+                Defaults
+                <select id="wf_defaults">
+                  <option value="true">Yes</option>
+                  <option value="false">No</option>
+                </select>
+              </label>
+            </div>
+            <div class="row" style="margin-top:8px;">
+              <button onclick="applyWhatIf()">Apply What-if</button>
+              <button onclick="resetWhatIf()">Reset</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="panel" style="margin-top:12px;">
+          <h4>Underwriting Note</h4>
+          <div id="noteBlock" class="note small"></div>
+        </div>
+      </div>
+
+      <div class="col">
+        <div class="panel">
+          <h4>Portfolio Overview</h4>
+          <div class="split" style="align-items:center;">
+            <div>
+              <div class="small-muted">Approved</div>
+              <div id="countApprove" class="mono" style="font-size:16px;"></div>
+            </div>
+            <div>
+              <div class="small-muted">Referred</div>
+              <div id="countRefer" class="mono" style="font-size:16px;"></div>
+            </div>
+            <div>
+              <div class="small-muted">Rejected</div>
+              <div id="countReject" class="mono" style="font-size:16px;"></div>
+            </div>
+            <div style="margin-left:auto; text-align:right;">
+              <div class="small-muted">Avg score</div>
+              <div id="avgScore" class="mono" style="font-size:16px;"></div>
+            </div>
+          </div>
+
+          <hr />
+
+          <div class="small-muted">Highest-risk applicant</div>
+          <div id="highestRisk" class="mono" style="margin-bottom:8px;"></div>
+
+          <div class="small-muted">Lowest-risk applicant</div>
+          <div id="lowestRisk" class="mono"></div>
+        </div>
+
+        <div class="panel" style="margin-top:12px;">
+          <h4>Ranking</h4>
+          <div id="rankingList"></div>
+        </div>
+
+        <div class="panel" style="margin-top:12px;">
+          <h4>Comparison</h4>
+          <div id="comparisonBlock" class="small"></div>
+        </div>
+      </div>
+    </div>
+
+    <hr style="margin-top:18px;" />
+    <div class="small">
+      Policy version: <span id="policyVersion" class="mono"></span>
+    </div>
+  </div>
+
+  <script>
+    let policy = null;
+    let cases = [];
+    let currentIdx = 0;
+    let currentApplicant = null;
+    let originalApplicant = null;
+
+    /* ---- Tab switching ---- */
+    function switchTab(name) {
+      document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+      document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+      if (name === 'golden') {
+        document.querySelectorAll('.tab')[0].classList.add('active');
+        document.getElementById('tab-golden').classList.add('active');
+      } else {
+        document.querySelectorAll('.tab')[1].classList.add('active');
+        document.getElementById('tab-custom').classList.add('active');
+      }
+    }
+
+    /* ---- Matching logic ---- */
+    function matches(conditions, applicant) {
+      for (const [key, value] of Object.entries(conditions)) {
+        if (key.endsWith("_lt")) {
+          const field = key.slice(0, -3);
+          if (!(field in applicant) || Number(applicant[field]) >= Number(value)) return false;
+        } else if (key.endsWith("_gt")) {
+          const field = key.slice(0, -3);
+          if (!(field in applicant) || Number(applicant[field]) <= Number(value)) return false;
+        } else if (key.endsWith("_eq")) {
+          const field = key.slice(0, -3);
+          if (applicant[field] !== value) return false;
+        } else {
+          if (applicant[key] !== value) return false;
+        }
+      }
+      return true;
+    }
+
+    /* ---- Scoring and risk ---- */
+    function computeScore(app) {
+      // Components:
+      // credit: 300-850 => 0-50
+      const cs = Number(app.credit_score) || 0;
+      const creditComponent = Math.max(0, Math.min(1, (cs - 300) / (850 - 300))) * 50;
+
+      // dti: 0-1 => lower better => 0.0 => 30, 1.0 => 0
+      const dti = Number(app.dti) || 1;
+      const dtiComponent = Math.max(0, Math.min(1, 1 - dti)) * 30;
+
+      // income: normalize against 100k => 0-20
+      const income = Number(app.income) || 0;
+      const incomeComponent = Math.max(0, Math.min(1, income / 100000)) * 20;
+
+      let score = creditComponent + dtiComponent + incomeComponent;
+
+      if (app.defaults_past_24m === true || app.defaults_past_24m === "true") {
+        score = score - 30; // penalty
+      }
+
+      score = Math.round(Math.max(0, Math.min(100, score)));
+      return score;
+    }
+
+    function riskBand(score) {
+      if (score >= 80) return { label: "Low Risk", cls: "risk-low", reason: "Strong credit, low DTI or high income." };
+      if (score >= 50) return { label: "Medium Risk", cls: "risk-med", reason: "Moderate credit or DTI; may require review." };
+      return { label: "High Risk", cls: "risk-high", reason: "Low credit, high DTI, low income, or recent defaults." };
+    }
+
+    /* ---- Multi-rule evaluate (matches Python rules.py behavior) ---- */
+    function evaluate(applicant, policy) {
+      const rules = [...(policy.rules || [])].sort((a, b) => (a.priority ?? 999999) - (b.priority ?? 999999));
+      const reason_ids = [];
+      const reasons = [];
+      const matched_decisions = [];
+
+      for (const rule of rules) {
+        if (matches(rule.conditions || {}, applicant)) {
+          reason_ids.push(rule.id);
+          reasons.push(rule.reason);
+          matched_decisions.push(rule.decision);
+        }
+      }
+
+      let overall = policy.default_decision || "approve";
+      if (reason_ids.length === 0) {
+        overall = policy.default_decision || "approve";
+      } else {
+        // Severity: reject > refer > approve
+        if (matched_decisions.some(d => d === "reject")) {
+          overall = "reject";
+        } else if (matched_decisions.some(d => d === "refer")) {
+          overall = "refer";
+        } else {
+          overall = "approve";
+        }
+      }
+
+      const score = computeScore(applicant);
+      const band = riskBand(score);
+
+      return { decision: overall, reason_ids: reason_ids, reasons: reasons, score: score, band: band };
+    }
+
+    /* ---- Rendering ---- */
+    function badge(decision) {
+      const cls = decision === "approve" ? "approve" : decision === "reject" ? "reject" : "refer";
+      return `<span class="badge ${cls}">${decision.toUpperCase()}</span>`;
+    }
+
+    function renderApplicant(app) {
+      const parts = [
+        `Name: ${app.name || app.case_id || "(unnamed)"}`,
+        `Credit: ${app.credit_score}`,
+        `Income: ${app.income}`,
+        `DTI: ${app.dti}`,
+        `Defaults (24m): ${app.defaults_past_24m}`
+      ];
+      document.getElementById("applicantView").innerText = parts.join(" | ");
+    }
+
+    function renderDecision(out) {
+      let html = `<div style="display:flex;gap:12px;align-items:center;">${badge(out.decision)} <div class="mono small-muted">Score: ${out.score}</div> <div class="${out.band.cls}" title="${out.band.reason}">${out.band.label}</div></div>`;
+      document.getElementById("decisionLine").innerHTML = html;
+
+      if (!out.reason_ids || out.reason_ids.length === 0) {
+        document.getElementById("reasonsBlock").innerHTML = `<div class="small">No rule triggered.</div>`;
+      } else {
+        const items = out.reason_ids.map((id, i) =>
+          `<li><span class="mono">${id}</span> — ${out.reasons[i]}</li>`
+        ).join("");
+        document.getElementById("reasonsBlock").innerHTML = `<ul>${items}</ul>`;
+      }
+    }
+
+    /* ---- What-if editor ---- */
+    function openWhatIf() {
+      document.getElementById("whatIfPanel").style.display = "block";
+      populateWhatIfFromCurrent();
+    }
+
+    function populateWhatIfFromCurrent() {
+      const app = currentApplicant || originalApplicant || {};
+      document.getElementById("wf_credit_score").value = app.credit_score ?? "";
+      document.getElementById("wf_dti").value = app.dti ?? "";
+      document.getElementById("wf_income").value = app.income ?? "";
+      document.getElementById("wf_defaults").value = (app.defaults_past_24m === true || app.defaults_past_24m === "true") ? "true" : "false";
+    }
+
+    function applyWhatIf() {
+      if (!currentApplicant) currentApplicant = {};
+      currentApplicant.credit_score = Number(document.getElementById("wf_credit_score").value) || 0;
+      currentApplicant.dti = Number(document.getElementById("wf_dti").value) || 0;
+      currentApplicant.income = Number(document.getElementById("wf_income").value) || 0;
+      currentApplicant.defaults_past_24m = document.getElementById("wf_defaults").value === "true";
+      // Re-render based on what-if
+      const out = evaluate(currentApplicant, policy);
+      renderApplicant(currentApplicant);
+      renderDecision(out);
+      updatePortfolioOverview();
+      renderRanking();
+      renderComparison();
+      generateNote(false);
+    }
+
+    function resetWhatIf() {
+      currentApplicant = JSON.parse(JSON.stringify(originalApplicant));
+      populateWhatIfFromCurrent();
+      const out = evaluate(currentApplicant, policy);
+      renderApplicant(currentApplicant);
+      renderDecision(out);
+      updatePortfolioOverview();
+      renderRanking();
+      renderComparison();
+      generateNote(false);
+    }
+
+    /* ---- Comparison ---- */
+    function renderComparison() {
+      const compIdx = Number(document.getElementById("compareSelect").value);
+      if (isNaN(compIdx)) {
+        document.getElementById("comparisonBlock").innerHTML = `<div class="small">Select a comparison applicant.</div>`;
+        return;
+      }
+      const left = currentApplicant || originalApplicant || cases[currentIdx].input;
+      const right = cases[compIdx].input;
+
+      if (!left || !right) {
+        document.getElementById("comparisonBlock").innerHTML = `<div class="small">Comparison data missing.</div>`;
+        return;
+      }
+
+      const outL = evaluate(left, policy);
+      const outR = evaluate(right, policy);
+
+      const stronger = (outL.score === outR.score) ? "Both applicants have similar scores." :
+                       (outL.score > outR.score) ? `${left.name || left.case_id || "Selected"} appears stronger by score.` :
+                       `${right.name || right.case_id || "Comparison"} appears stronger by score.`;
+
+      const same = (left.name === right.name) && (left.case_id === right.case_id);
+
+      const html = `
+        <div style="display:flex;gap:12px;">
+          <div style="flex:1;">
+            <div class="small-muted">${left.name || left.case_id || "Selected"}</div>
+            <div>${badge(outL.decision)} <span class="mono">Score: ${outL.score}</span> <span class="${outL.band.cls}">${outL.band.label}</span></div>
+            <div class="small-muted">Triggered rules: ${outL.reason_ids.length}</div>
+          </div>
+          <div style="flex:1;">
+            <div class="small-muted">${right.name || right.case_id || "Comparison"}</div>
+            <div>${badge(outR.decision)} <span class="mono">Score: ${outR.score}</span> <span class="${outR.band.cls}">${outR.band.label}</span></div>
+            <div class="small-muted">Triggered rules: ${outR.reason_ids.length}</div>
+          </div>
+        </div>
+        <div style="margin-top:8px;" class="small">${same ? "Comparing the same applicant." : stronger}</div>
+      `;
+      document.getElementById("comparisonBlock").innerHTML = html;
+    }
+
+    /* ---- Portfolio overview and ranking ---- */
+    function updatePortfolioOverview() {
+      const summary = { approve: 0, refer: 0, reject: 0, totalScore: 0, count: 0 };
+      const evaluated = [];
+
+      for (let i = 0; i < cases.length; i++) {
+        const cs = cases[i];
+        let app = cs.input;
+        // if this is current index, substitute currentApplicant for up-to-date what-if changes
+        if (i === currentIdx && currentApplicant) {
+          app = currentApplicant;
+        }
+        const out = evaluate(app, policy);
+        evaluated.push({ idx: i, name: cs.name || cs.case_id, score: out.score, decision: out.decision });
+        summary.totalScore += out.score;
+        summary.count += 1;
+        if (out.decision === "approve") summary.approve++;
+        else if (out.decision === "refer") summary.refer++;
+        else if (out.decision === "reject") summary.reject++;
+      }
+
+      document.getElementById("countApprove").innerText = summary.approve;
+      document.getElementById("countRefer").innerText = summary.refer;
+      document.getElementById("countReject").innerText = summary.reject;
+      document.getElementById("avgScore").innerText = (summary.count ? Math.round(summary.totalScore / summary.count) : "N/A");
+
+      // Highest risk = lowest score
+      evaluated.sort((a,b) => a.score - b.score);
+      if (evaluated.length) {
+        document.getElementById("highestRisk").innerText = `${evaluated[0].name} — score ${evaluated[0].score}`;
+        document.getElementById("lowestRisk").innerText = `${evaluated[evaluated.length-1].name} — score ${evaluated[evaluated.length-1].score}`;
+      } else {
+        document.getElementById("highestRisk").innerText = "-";
+        document.getElementById("lowestRisk").innerText = "-";
+      }
+    }
+
+    function renderRanking() {
+      // Build ranked list (descending score)
+      const rows = [];
+      for (let i = 0; i < cases.length; i++) {
+        const cs = cases[i];
+        let app = cs.input;
+        if (i === currentIdx && currentApplicant) app = currentApplicant;
+        const out = evaluate(app, policy);
+        rows.push({ name: cs.name || cs.case_id, score: out.score });
+      }
+      rows.sort((a,b) => b.score - a.score);
+      const html = rows.map(r => {
+        const pct = r.score;
+        return `<div style="margin-bottom:8px;">
+          <div class="small-muted">${r.name} <span class="mono" style="float:right;">${r.score}</span></div>
+          <div class="bar" aria-hidden><div class="bar-fill" style="width:${pct}%;"></div></div>
+        </div>`;
+      }).join("");
+      document.getElementById("rankingList").innerHTML = html;
+    }
+
+    /* ---- Underwriting note ---- */
+    function generateNote(alsoShow=true) {
+      const app = currentApplicant || originalApplicant || cases[currentIdx].input;
+      const out = evaluate(app, policy);
+      const who = app.name || app.case_id || "Applicant";
+      const reasons = out.reasons.length ? out.reasons.map((r,i) => `- ${out.reason_ids[i]}: ${r}`).join("\n") : "No automated policy reasons triggered.";
+      const recommendation = out.decision === "approve" ? "Recommend approval and proceed to onboarding." :
+                             out.decision === "refer" ? "Recommend manual review by senior underwriter." :
+                             "Recommend rejection; clear policy reasons present.";
+      const note = `${who}
+Decision: ${out.decision.toUpperCase()}
+Score: ${out.score} (${out.band.label})
+Reasons:
+${reasons}
+
+Recommendation: ${recommendation}
+`;
+      if (alsoShow) {
+        document.getElementById("noteBlock").innerText = note;
+      } else {
+        document.getElementById("noteBlock").innerText = note;
+      }
+      return note;
+    }
+
+    /* ---- Run from golden case ---- */
+    function runGolden() {
+      const idx = Number(document.getElementById("caseSelect").value);
+      currentIdx = idx;
+      const cs = cases[idx];
+      // deep copy originals
+      originalApplicant = JSON.parse(JSON.stringify(cs.input));
+      currentApplicant = JSON.parse(JSON.stringify(cs.input));
+      renderApplicant(currentApplicant);
+      const out = evaluate(currentApplicant, policy);
+      renderDecision(out);
+      populateWhatIfFromCurrent();
+      updatePortfolioOverview();
+      renderRanking();
+      renderComparison();
+      generateNote(false);
+    }
+
+    function onCaseChange() {
+      const idx = Number(document.getElementById("caseSelect").value);
+      currentIdx = idx;
+      const cs = cases[idx];
+      originalApplicant = JSON.parse(JSON.stringify(cs.input));
+      currentApplicant = JSON.parse(JSON.stringify(cs.input));
+      renderApplicant(currentApplicant);
+      const out = evaluate(currentApplicant, policy);
+      renderDecision(out);
+      populateWhatIfFromCurrent();
+      updatePortfolioOverview();
+      renderRanking();
+      renderComparison();
+      generateNote(false);
+    }
+
+    /* ---- Run from custom input ---- */
+    function runCustom() {
+      const applicant = {
+        name: "Custom",
+        credit_score: Number(document.getElementById("inp_credit_score").value),
+        dti: Number(document.getElementById("inp_dti").value),
+        income: Number(document.getElementById("inp_income").value),
+        defaults_past_24m: document.getElementById("inp_defaults").value === "true"
+      };
+      // treat custom as temporary current applicant (no index)
+      currentIdx = -1;
+      originalApplicant = JSON.parse(JSON.stringify(applicant));
+      currentApplicant = JSON.parse(JSON.stringify(applicant));
+      renderApplicant(currentApplicant);
+      const out = evaluate(currentApplicant, policy);
+      renderDecision(out);
+      populateWhatIfFromCurrent();
+      updatePortfolioOverview();
+      renderRanking();
+      renderComparison();
+      generateNote(false);
+    }
+
+    /* ---- Load data ---- */
+    async function loadData() {
+      const p = await fetch("data/policy.json").then(r => r.json());
+      const c = await fetch("data/golden_cases.json").then(r => r.json());
+      policy = p;
+      cases = c;
+
+      document.getElementById("policyVersion").innerText = policy.version || "unknown";
+
+      const select = document.getElementById("caseSelect");
+      const comp = document.getElementById("compareSelect");
+      select.innerHTML = "";
+      comp.innerHTML = "";
+
+      cases.forEach((cs, idx) => {
+        const opt = document.createElement("option");
+        opt.value = idx;
+        opt.textContent = cs.name || cs.case_id || `case ${idx}`;
+        select.appendChild(opt);
+
+        const opt2 = document.createElement("option");
+        opt2.value = idx;
+        opt2.textContent = cs.name || cs.case_id || `case ${idx}`;
+        comp.appendChild(opt2);
+      });
+
+      // initialize current to first case
+      if (cases.length > 0) {
+        currentIdx = 0;
+        originalApplicant = JSON.parse(JSON.stringify(cases[0].input));
+        currentApplicant = JSON.parse(JSON.stringify(cases[0].input));
+        renderApplicant(currentApplicant);
+        renderDecision(evaluate(currentApplicant, policy));
+      }
+
+      populateWhatIfFromCurrent();
+      updatePortfolioOverview();
+      renderRanking();
+      renderComparison();
+      generateNote(false);
+    }
+
+    loadData();
+  </script>
+</body>
+</html>

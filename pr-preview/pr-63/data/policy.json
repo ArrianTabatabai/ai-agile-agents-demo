@@ -1,0 +1,34 @@
+{
+  "version": "1.0",
+  "default_decision": "approve",
+  "rules": [
+    {
+      "id": "R1",
+      "priority": 10,
+      "decision": "reject",
+      "reason": "Credit score too low",
+      "conditions": { "credit_score_lt": 620 }
+    },
+    {
+      "id": "R2",
+      "priority": 20,
+      "decision": "reject",
+      "reason": "Debt-to-income ratio too high",
+      "conditions": { "dti_gt": 0.45 }
+    },
+    {
+      "id": "R3",
+      "priority": 30,
+      "decision": "refer",
+      "reason": "Low income requires manual review",
+      "conditions": { "income_lt": 25000 }
+    },
+    {
+      "id": "R4",
+      "priority": 5,
+      "decision": "reject",
+      "reason": "Recent defaults",
+      "conditions": { "defaults_past_24m": true }
+    }
+  ]
+}
